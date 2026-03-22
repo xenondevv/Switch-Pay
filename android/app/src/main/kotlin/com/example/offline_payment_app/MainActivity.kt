@@ -9,6 +9,7 @@ import android.media.ToneGenerator
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
 import android.telecom.TelecomManager
@@ -38,11 +39,9 @@ class MainActivity: FlutterActivity() {
     private var waitingForCallback = false
     private var outgoingIvrActive = false
     private var toneGenerator: ToneGenerator? = null
-    private var audioManager: AudioManager? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
-        audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         methodChannelInstance = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL)
         methodChannelInstance!!.setMethodCallHandler { call, result ->
             when (call.method) {
@@ -156,16 +155,11 @@ class MainActivity: FlutterActivity() {
     }
 
     // ========================
-    // IVR — Speakerphone + ToneGenerator DTMF
+    // IVR — Hidden API ITelephony.sendDtmf() via Reflection
     //
-    // Strategy:
-    //   VoLTE bypasses Android audio framework for DTMF, so URI commas
-    //   and STREAM_VOICE_CALL tones don't reach the IVR.
-    //
-    //   Solution: Turn on SPEAKERPHONE, play DTMF tones LOUD through
-    //   the speaker. The phone's microphone picks up the tones from
-    //   the speaker and sends them through the VoLTE uplink audio.
-    //   This is "acoustic coupling" — works on ANY phone, ANY network.
+    // Uses Android's internal telephony service to send DTMF directly
+    // through the modem/telephony stack. Works on ANY network (GSM/VoLTE)
+    // without being the default dialer.
     //
     // Flow:
     //   Call → 18s welcome → press 1 → 2s → number# → 2s → amount#
@@ -187,39 +181,43 @@ class MainActivity: FlutterActivity() {
                         if (!callConnected && outgoingIvrActive) {
                             callConnected = true
                             Log.d("OfflinePayment", ">>> CALL CONNECTED")
-                            step("ivr_connected", "📞 Connected! Turning on speaker for DTMF...", false)
+                            step("ivr_connected", "📞 Connected! Waiting for IVR menu...", false)
 
-                            // Turn on speakerphone so DTMF tones go through the mic
+                            // Test DTMF method availability immediately
                             handler.postDelayed({
-                                enableSpeakerForDtmf()
-                            }, 1000)
+                                val method = getDtmfMethod()
+                                Log.d("OfflinePayment", "DTMF method: ${method ?: "NONE AVAILABLE"}")
+                                if (method == null) {
+                                    step("ivr_warn", "⚠️ DTMF API not available on this device", false)
+                                }
+                            }, 2000)
 
                             handler.postDelayed({
                                 step("ivr_wait", "⏳ Waiting for welcome (18s)...", false)
-                            }, 2000)
+                            }, 3000)
 
                             // +18s: Press 1 → Transfer Money
                             handler.postDelayed({
                                 step("ivr_menu", "📞 Pressing 1 → Transfer Money", false)
-                                playDtmfLoud('1')
+                                sendDtmfDirect('1')
                             }, 18000)
 
                             // +20s: Enter phone number + #
                             handler.postDelayed({
                                 step("ivr_number", "📞 Entering: $target #", false)
-                                playSequenceLoud("$target#") {}
+                                sendSequenceDirect("$target#") {}
                             }, 20000)
 
-                            // +25s: Enter amount + #  (give 5s for number entry)
+                            // +25s: Enter amount + #
                             handler.postDelayed({
                                 step("ivr_amount", "📞 Entering: ₹$amount #", false)
-                                playSequenceLoud("$amount#") {}
+                                sendSequenceDirect("$amount#") {}
                             }, 25000)
 
                             // +30s: Press 1 → Confirm
                             handler.postDelayed({
                                 step("ivr_confirm", "📞 Pressing 1 → Confirm", false)
-                                playDtmfLoud('1')
+                                sendDtmfDirect('1')
                             }, 30000)
                         }
                     }
@@ -229,8 +227,6 @@ class MainActivity: FlutterActivity() {
                             outgoingIvrActive = false
                             tm.listen(this, PhoneStateListener.LISTEN_NONE)
                             Log.d("OfflinePayment", ">>> CALL 1 ENDED")
-                            // Disable speaker after call 1
-                            disableSpeaker()
                             step("ivr_call1_done", "✅ Call 1 done. Waiting for callback...", false)
                             waitingForCallback = true
                             startCallbackListener()
@@ -240,7 +236,7 @@ class MainActivity: FlutterActivity() {
             }
         }, PhoneStateListener.LISTEN_CALL_STATE)
 
-        // Place a PLAIN call — DTMF sent via speakerphone acoustic coupling
+        // Place a PLAIN call
         try {
             val uri = Uri.parse("tel:+918045163666")
             val intent = Intent(Intent.ACTION_CALL, uri)
@@ -253,67 +249,103 @@ class MainActivity: FlutterActivity() {
     }
 
     // ========================
-    // SPEAKERPHONE DTMF (acoustic coupling)
+    // DIRECT DTMF via Hidden Telephony API (Reflection)
+    //
+    // Method 1: TelephonyManager → getITelephony() → sendDtmf(char)
+    // Method 2: ServiceManager → getService("phone") → ITelephony.Stub → sendDtmf(char)
     // ========================
-    private fun enableSpeakerForDtmf() {
+
+    private fun getDtmfMethod(): String? {
+        // Method 1: TelephonyManager.getITelephony()
         try {
-            audioManager?.let { am ->
-                am.mode = AudioManager.MODE_IN_CALL
-                am.isSpeakerphoneOn = true
-                // Set volume to max for reliable DTMF pickup
-                val maxVol = am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, maxVol, 0)
-                Log.d("OfflinePayment", "🔊 Speaker ON, volume MAX")
+            val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val getIT = tm.javaClass.getDeclaredMethod("getITelephony")
+            getIT.isAccessible = true
+            val it = getIT.invoke(tm)
+            if (it != null) {
+                // Check if sendDtmf exists
+                val m = it.javaClass.getMethod("sendDtmf", Char::class.javaPrimitiveType)
+                Log.d("OfflinePayment", "✅ Method 1 available: ITelephony.sendDtmf via TelephonyManager")
+                return "METHOD_1"
             }
         } catch (e: Exception) {
-            Log.e("OfflinePayment", "Speaker setup failed: ${e.message}")
+            Log.d("OfflinePayment", "Method 1 failed: ${e.javaClass.simpleName}: ${e.message}")
         }
-    }
 
-    private fun disableSpeaker() {
+        // Method 2: ServiceManager.getService("phone")
         try {
-            audioManager?.isSpeakerphoneOn = false
-            Log.d("OfflinePayment", "🔇 Speaker OFF")
-        } catch (_: Exception) {}
-    }
-
-    /**
-     * Play a DTMF tone LOUD through the speaker.
-     * The mic picks it up → sends to IVR via uplink audio.
-     * Uses STREAM_MUSIC (goes to speaker) + 500ms duration for reliable detection.
-     */
-    private fun playDtmfLoud(d: Char) {
-        try {
-            // Create tone generator on STREAM_MUSIC (speaker audio, NOT call audio)
-            val tg = ToneGenerator(AudioManager.STREAM_MUSIC, ToneGenerator.MAX_VOLUME)
-            val tone = when(d) {
-                '0' -> ToneGenerator.TONE_DTMF_0; '1' -> ToneGenerator.TONE_DTMF_1
-                '2' -> ToneGenerator.TONE_DTMF_2; '3' -> ToneGenerator.TONE_DTMF_3
-                '4' -> ToneGenerator.TONE_DTMF_4; '5' -> ToneGenerator.TONE_DTMF_5
-                '6' -> ToneGenerator.TONE_DTMF_6; '7' -> ToneGenerator.TONE_DTMF_7
-                '8' -> ToneGenerator.TONE_DTMF_8; '9' -> ToneGenerator.TONE_DTMF_9
-                '#' -> ToneGenerator.TONE_DTMF_P; '*' -> ToneGenerator.TONE_DTMF_S
-                else -> { Log.e("OfflinePayment", "Unknown DTMF char: $d"); return }
+            val sm = Class.forName("android.os.ServiceManager")
+            val getService = sm.getMethod("getService", String::class.java)
+            val binder = getService.invoke(null, "phone") as? IBinder
+            if (binder != null) {
+                val stub = Class.forName("com.android.internal.telephony.ITelephony\$Stub")
+                val asInterface = stub.getMethod("asInterface", IBinder::class.java)
+                val it = asInterface.invoke(null, binder)
+                if (it != null) {
+                    val m = it.javaClass.getMethod("sendDtmf", Char::class.javaPrimitiveType)
+                    Log.d("OfflinePayment", "✅ Method 2 available: ITelephony.sendDtmf via ServiceManager")
+                    return "METHOD_2"
+                }
             }
-            tg.startTone(tone, 500)  // 500ms for reliable acoustic detection
-            Log.d("OfflinePayment", "🔊 DTMF LOUD: '$d' (500ms)")
-            // Release after tone completes
-            handler.postDelayed({ tg.release() }, 600)
         } catch (e: Exception) {
-            Log.e("OfflinePayment", "DTMF failed: ${e.message}")
+            Log.d("OfflinePayment", "Method 2 failed: ${e.javaClass.simpleName}: ${e.message}")
         }
+
+        Log.e("OfflinePayment", "❌ No DTMF method available")
+        return null
     }
 
-    /**
-     * Play a sequence of DTMF tones loudly.
-     * 700ms between each tone (500ms tone + 200ms silence).
-     */
-    private fun playSequenceLoud(digits: String, done: () -> Unit) {
+    @Suppress("PrivateApi")
+    private fun sendDtmfDirect(digit: Char): Boolean {
+        Log.d("OfflinePayment", ">>> Sending DTMF '$digit' via telephony API...")
+
+        // Method 1: TelephonyManager → getITelephony() → sendDtmf()
+        try {
+            val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val getIT = tm.javaClass.getDeclaredMethod("getITelephony")
+            getIT.isAccessible = true
+            val iTelephony = getIT.invoke(tm)
+            if (iTelephony != null) {
+                val sendDtmf = iTelephony.javaClass.getMethod("sendDtmf", Char::class.javaPrimitiveType)
+                val result = sendDtmf.invoke(iTelephony, digit)
+                Log.d("OfflinePayment", "✅ DTMF '$digit' sent via Method 1, result=$result")
+                return true
+            }
+        } catch (e: Exception) {
+            Log.d("OfflinePayment", "Method 1 sendDtmf failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        // Method 2: ServiceManager → ITelephony.Stub → sendDtmf()
+        try {
+            val sm = Class.forName("android.os.ServiceManager")
+            val getService = sm.getMethod("getService", String::class.java)
+            val binder = getService.invoke(null, "phone") as? IBinder
+            if (binder != null) {
+                val stub = Class.forName("com.android.internal.telephony.ITelephony\$Stub")
+                val asInterface = stub.getMethod("asInterface", IBinder::class.java)
+                val iTelephony = asInterface.invoke(null, binder)
+                if (iTelephony != null) {
+                    val sendDtmf = iTelephony.javaClass.getMethod("sendDtmf", Char::class.javaPrimitiveType)
+                    val result = sendDtmf.invoke(iTelephony, digit)
+                    Log.d("OfflinePayment", "✅ DTMF '$digit' sent via Method 2, result=$result")
+                    return true
+                }
+            }
+        } catch (e: Exception) {
+            Log.d("OfflinePayment", "Method 2 sendDtmf failed: ${e.javaClass.simpleName}: ${e.message}")
+        }
+
+        Log.e("OfflinePayment", "❌ ALL DTMF methods failed for '$digit'")
+        return false
+    }
+
+    private fun sendSequenceDirect(digits: String, done: () -> Unit) {
         digits.forEachIndexed { i, d ->
             handler.postDelayed({
-                playDtmfLoud(d)
-                if (i == digits.length - 1) handler.postDelayed(done, 700)
-            }, i * 700L)  // 700ms per digit
+                val ok = sendDtmfDirect(d)
+                Log.d("OfflinePayment", "Seq DTMF '$d': ${if (ok) "✅" else "❌"}")
+                if (i == digits.length - 1) handler.postDelayed(done, 500)
+            }, i * 500L)  // 500ms between digits
         }
     }
 
@@ -337,18 +369,15 @@ class MainActivity: FlutterActivity() {
                     TelephonyManager.CALL_STATE_OFFHOOK -> {
                         if (!answered) {
                             answered = true
-                            // Enable speaker for callback DTMF too
-                            handler.postDelayed({ enableSpeakerForDtmf() }, 1000)
-
                             handler.postDelayed({
                                 step("ivr_cb_confirm", "📞 Pressing 1 → Verify", false)
-                                playDtmfLoud('1')
+                                sendDtmfDirect('1')
                             }, 5000)
                             handler.postDelayed({
                                 step("ivr_pin", "🔒 Enter UPI PIN below", false)
                                 PaymentOverlayService.showPinInput { pin ->
                                     step("ivr_pin_entry", "🔒 Sending PIN...", false)
-                                    playSequenceLoud(pin) {
+                                    sendSequenceDirect(pin) {
                                         step("ivr_pin_done", "✅ PIN sent. Waiting...", false)
                                     }
                                 }
@@ -359,7 +388,6 @@ class MainActivity: FlutterActivity() {
                         if (answered) {
                             waitingForCallback = false
                             tm.listen(this, PhoneStateListener.LISTEN_NONE)
-                            disableSpeaker()
                             handler.postDelayed({
                                 step("success", "✅ Payment complete!\nCheck SMS for confirmation.", true)
                                 handler.postDelayed({ closeOverlay() }, 3000)
@@ -394,10 +422,5 @@ class MainActivity: FlutterActivity() {
         handler.post { methodChannelInstance?.invokeMethod("paymentStatus", mapOf("status" to status, "message" to msg, "isFinal" to isFinal)) }
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        toneGenerator?.release()
-        toneGenerator = null
-        disableSpeaker()
-    }
+    override fun onDestroy() { super.onDestroy(); toneGenerator?.release(); toneGenerator = null }
 }

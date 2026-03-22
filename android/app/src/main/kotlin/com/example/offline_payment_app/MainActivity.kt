@@ -18,6 +18,7 @@ import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import com.example.offline_payment_app.engine.PaymentOverlayService
+import com.example.offline_payment_app.engine.UssdAccessibilityService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -154,18 +155,19 @@ class MainActivity: FlutterActivity() {
     }
 
     // ========================
-    // IVR — URI-based DTMF + PhoneStateListener for overlay timing
+    // IVR — AccessibilityService Dialpad Tapping
     //
     // Strategy:
-    //   - DTMF tones embedded in tel: URI (this is what the IVR actually receives)
-    //   - PhoneStateListener detects OFFHOOK (connected) → update overlay live
-    //   - PhoneStateListener detects IDLE (call ended) → start callback listener
+    //   - Place a PLAIN call (no DTMF in URI — commas don't work on VoLTE)
+    //   - PhoneStateListener detects OFFHOOK → wait for welcome → open keypad
+    //   - AccessibilityService physically taps the dialer's keypad buttons
+    //   - Each key tap is verified (logged ✅ or ❌)
     //
-    // Timing (each comma ≈ 1s on this device):
-    //   20 commas → press 1
-    //   3 commas  → enter number#
-    //   3 commas  → enter amount#
-    //   5 commas  → press 1 (confirm)
+    // Timing:
+    //   +20s  → open keypad, press 1
+    //   +3s   → enter number + #
+    //   +3s   → enter amount + #
+    //   +5s   → press 1 (confirm)
     // ========================
 
     @Suppress("DEPRECATION")
@@ -173,21 +175,7 @@ class MainActivity: FlutterActivity() {
         startOverlay()
         outgoingIvrActive = true
 
-        // Build DTMF string with precise comma counts
-        val c20 = ",".repeat(20)   // ~20s for welcome
-        val c3  = ",".repeat(3)    // ~3s between steps
-        val c5  = ",".repeat(5)    // ~5s for confirm prompt
-
-        // Encode # as %23 (# is URI fragment separator, would break Uri.parse)
-        // DO NOT use Uri.fromParts — it encodes commas as %2C which the dialer ignores!
-        val raw = "+918045163666${c20}1${c3}${target}%23${c3}${amount}%23${c5}1"
-        Log.d("OfflinePayment", "DTMF raw (${c20.length} initial commas): $raw")
-
-        val uri = Uri.parse("tel:$raw")
-        Log.d("OfflinePayment", "URI toString: $uri")
-        Log.d("OfflinePayment", "URI SSP: ${uri.schemeSpecificPart}")
-
-        // Set up call state listener for overlay updates
+        // Set up call state listener
         val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         var callConnected = false
 
@@ -198,14 +186,52 @@ class MainActivity: FlutterActivity() {
                         if (!callConnected && outgoingIvrActive) {
                             callConnected = true
                             Log.d("OfflinePayment", ">>> CALL CONNECTED")
-                            step("ivr_connected", "📞 Connected! DTMF will play automatically...", false)
+                            step("ivr_connected", "📞 Connected! Waiting for IVR menu...", false)
 
-                            // Overlay updates timed from ACTUAL connect
-                            handler.postDelayed({ step("ivr_wait", "⏳ Waiting for welcome message (20s)...", false) }, 2000)
-                            handler.postDelayed({ step("ivr_menu", "📞 Pressing 1 → Transfer Money", false) }, 20000)
-                            handler.postDelayed({ step("ivr_number", "📞 Entering: $target #", false) }, 23000)
-                            handler.postDelayed({ step("ivr_amount", "📞 Entering: ₹$amount #", false) }, 26000)
-                            handler.postDelayed({ step("ivr_confirm", "📞 Pressing 1 → Confirm", false) }, 31000)
+                            // Dump the UI tree for debugging (remove after it works)
+                            handler.postDelayed({
+                                Log.d("OfflinePayment", "Dumping window tree for debugging...")
+                                UssdAccessibilityService.dumpWindowTree()
+                            }, 5000)
+
+                            // +2s: show waiting message
+                            handler.postDelayed({
+                                step("ivr_wait", "⏳ Waiting for welcome message (20s)...", false)
+                            }, 2000)
+
+                            // +18s: open dialpad first
+                            handler.postDelayed({
+                                val opened = UssdAccessibilityService.openDialpad()
+                                Log.d("OfflinePayment", "Dialpad open: $opened")
+                                if (!opened) {
+                                    step("ivr_keypad", "⌨️ Dialpad may already be open...", false)
+                                }
+                            }, 18000)
+
+                            // +20s: press 1 (Transfer Money)
+                            handler.postDelayed({
+                                step("ivr_menu", "📞 Pressing 1 → Transfer Money", false)
+                                val ok = UssdAccessibilityService.tapDialpadKey('1')
+                                if (!ok) step("ivr_menu_fail", "❌ Could not tap '1' — check Accessibility Service", false)
+                            }, 20000)
+
+                            // +23s: enter target number + #
+                            handler.postDelayed({
+                                step("ivr_number", "📞 Entering: $target #", false)
+                                tapSequenceViaAccessibility("$target#")
+                            }, 23000)
+
+                            // +26s: enter amount + #
+                            handler.postDelayed({
+                                step("ivr_amount", "📞 Entering: ₹$amount #", false)
+                                tapSequenceViaAccessibility("$amount#")
+                            }, 28000)
+
+                            // +31s: press 1 (confirm)
+                            handler.postDelayed({
+                                step("ivr_confirm", "📞 Pressing 1 → Confirm", false)
+                                UssdAccessibilityService.tapDialpadKey('1')
+                            }, 33000)
                         }
                     }
                     TelephonyManager.CALL_STATE_IDLE -> {
@@ -223,14 +249,28 @@ class MainActivity: FlutterActivity() {
             }
         }, PhoneStateListener.LISTEN_CALL_STATE)
 
-        // Place the call WITH DTMF in URI
+        // Place a PLAIN call — NO DTMF in URI
         try {
+            val uri = Uri.parse("tel:+918045163666")
             val intent = Intent(Intent.ACTION_CALL, uri)
             startActivity(intent)
             step("ivr_dialing", "📞 Dialing IVR number...", false)
         } catch (e: Exception) {
             closeOverlay()
             sendStep("error", "Call failed: ${e.message}", true)
+        }
+    }
+
+    /**
+     * Tap a sequence of digits on the dialer keypad via AccessibilityService.
+     * Each digit is tapped with a 400ms interval.
+     */
+    private fun tapSequenceViaAccessibility(digits: String) {
+        digits.forEachIndexed { i, d ->
+            handler.postDelayed({
+                val ok = UssdAccessibilityService.tapDialpadKey(d)
+                Log.d("OfflinePayment", "Tap '$d': ${if (ok) "✅" else "❌"}")
+            }, i * 400L)
         }
     }
 

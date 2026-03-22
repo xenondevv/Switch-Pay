@@ -17,7 +17,6 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
-import com.example.offline_payment_app.engine.PaymentInCallService
 import com.example.offline_payment_app.engine.PaymentOverlayService
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -27,7 +26,6 @@ class MainActivity: FlutterActivity() {
     private val CHANNEL = "offline_payment_channel"
     private val PERMISSION_REQUEST_CODE = 200
     private val OVERLAY_PERMISSION_CODE = 201
-    private val DIALER_ROLE_CODE = 300
     private var pendingTarget = ""
     private var pendingAmount = ""
     private var pendingMode = "USSD"
@@ -39,7 +37,7 @@ class MainActivity: FlutterActivity() {
     private var isOverlayActive = false
     private var waitingForCallback = false
     private var outgoingIvrActive = false
-    private var dialer_requested = false  // prevent infinite loop
+    private var toneGenerator: ToneGenerator? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -55,7 +53,6 @@ class MainActivity: FlutterActivity() {
                     pendingMode = mode
                     isBalanceCheck = (target == "BALANCE")
                     ussdStep = 0
-                    dialer_requested = false
 
                     val perms = mutableListOf<String>()
                     if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
@@ -84,15 +81,6 @@ class MainActivity: FlutterActivity() {
         super.onActivityResult(rc, resultCode, data)
         if (rc == OVERLAY_PERMISSION_CODE && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && Settings.canDrawOverlays(this))
             startPaymentFlow(pendingMode, pendingTarget, pendingAmount)
-        if (rc == DIALER_ROLE_CODE) {
-            if (resultCode == android.app.Activity.RESULT_OK) {
-                Log.d("OfflinePayment", "Default Dialer granted! Proceeding...")
-                startIvrCall(pendingTarget, pendingAmount)
-            } else {
-                Log.e("OfflinePayment", "Default Dialer denied. Cannot send DTMF.")
-                sendStep("error", "⚠️ Default Dialer permission required for DTMF.\nPlease try again and accept.", true)
-            }
-        }
     }
 
     private fun startPaymentFlow(mode: String, target: String, amount: String) {
@@ -103,51 +91,9 @@ class MainActivity: FlutterActivity() {
                     startActivityForResult(Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName")), OVERLAY_PERMISSION_CODE)
                     return
                 }
-                requestDialerAndStart(target, amount)
+                startIvrWithDtmf(target, amount)
             }
             else -> startInAppUssd(target, amount)
-        }
-    }
-
-    // ========================
-    // DEFAULT DIALER REQUEST (one-time, prevents loop)
-    // ========================
-    private fun requestDialerAndStart(target: String, amount: String) {
-        // Check if already default dialer
-        if (isDefaultDialer()) {
-            Log.d("OfflinePayment", "Already default dialer, starting IVR call...")
-            startIvrCall(target, amount)
-            return
-        }
-
-        // Only request ONCE per payment attempt
-        if (dialer_requested) {
-            Log.e("OfflinePayment", "Dialer already requested and denied, aborting")
-            sendStep("error", "⚠️ Default Dialer permission required.\nGo to Settings → Default Apps → Phone → Set this app.", true)
-            return
-        }
-
-        dialer_requested = true
-        sendStep("dialer_permission", "⚙️ Need Default Phone App permission (one-time)...", false)
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(Context.ROLE_SERVICE) as android.app.role.RoleManager
-            val intent = roleManager.createRequestRoleIntent(android.app.role.RoleManager.ROLE_DIALER)
-            startActivityForResult(intent, DIALER_ROLE_CODE)
-        } else {
-            val intent = Intent(TelecomManager.ACTION_CHANGE_DEFAULT_DIALER)
-                .putExtra(TelecomManager.EXTRA_CHANGE_DEFAULT_DIALER_PACKAGE_NAME, packageName)
-            startActivityForResult(intent, DIALER_ROLE_CODE)
-        }
-    }
-
-    private fun isDefaultDialer(): Boolean {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = getSystemService(Context.ROLE_SERVICE) as android.app.role.RoleManager
-            roleManager.isRoleHeld(android.app.role.RoleManager.ROLE_DIALER)
-        } else {
-            val telecomManager = getSystemService(Context.TELECOM_SERVICE) as TelecomManager
-            packageName == telecomManager.defaultDialerPackage
         }
     }
 
@@ -208,28 +154,53 @@ class MainActivity: FlutterActivity() {
     }
 
     // ========================
-    // IVR — InCallService + Call.playDtmfTone() for network-level DTMF
+    // IVR — DTMF via commas in tel: URI
     //
-    // This is the ONLY reliable way to send DTMF on VoLTE:
-    //   - App becomes Default Dialer → Android binds PaymentInCallService
-    //   - PaymentInCallService gets the active Call object
-    //   - Call.playDtmfTone(char) injects DTMF directly into the network stream
-    //   - PhoneStateListener manages overlay timing from actual OFFHOOK
+    // Flow (from user):
+    //   Call → 10-15s welcome (can't input) → menu options → press 1
+    //   → 2s → enter number# → 2s → enter amount# → 3-5s → press 1 confirm
+    //   → call cuts → 2-3s callback → intro → press 1 → UPI PIN → done
     //
-    // Timing from call connect:
-    //   +20s → press 1 (Transfer Money)
-    //   +23s → enter number + #
-    //   +26s → enter amount + #
-    //   +31s → press 1 (confirm)
+    // Each comma = ~1 second pause
     // ========================
 
     @Suppress("DEPRECATION")
-    private fun startIvrCall(target: String, amount: String) {
+    private fun startIvrWithDtmf(target: String, amount: String) {
         startOverlay()
         outgoingIvrActive = true
-        PaymentInCallService.activeCall = null
 
-        // Set up call state listener for overlay + DTMF timing
+        // Build the tel: URI with DTMF commas
+        // Timing: 18s welcome, 2s gaps, 5s before confirm
+        val pauses = ","  // each comma ≈ 1s
+
+        val welcome  = pauses.repeat(18)  // 18s wait for welcome + menu
+        val gap      = pauses.repeat(2)   // 2s between inputs
+        val confirm  = pauses.repeat(5)   // 5s before confirm prompt
+
+        // Build: number → wait → 1 → gap → phone# → gap → amount# → wait → 1
+        val dtmfPart = "${welcome}1${gap}${target}%23${gap}${amount}%23${confirm}1"
+        val fullUri  = "tel:+918045163666${dtmfPart}"
+
+        Log.d("OfflinePayment", "=== IVR CALL ===")
+        Log.d("OfflinePayment", "Full URI string: $fullUri")
+        Log.d("OfflinePayment", "Comma count: welcome=${welcome.length}, gap=${gap.length}, confirm=${confirm.length}")
+
+        // IMPORTANT: Use Uri.parse() — it does NOT re-encode the string
+        // Uri.fromParts() would encode commas as %2C which breaks DTMF!
+        val uri = Uri.parse(fullUri)
+
+        // Log the actual URI to verify commas are preserved
+        val uriStr = uri.toString()
+        val hasRealCommas = uriStr.contains(",")
+        val hasEncodedCommas = uriStr.contains("%2C")
+        Log.d("OfflinePayment", "URI.toString(): $uriStr")
+        Log.d("OfflinePayment", "Has real commas: $hasRealCommas | Has encoded %2C: $hasEncodedCommas")
+
+        if (hasEncodedCommas) {
+            Log.e("OfflinePayment", "!!! COMMAS GOT ENCODED — DTMF WILL NOT WORK !!!")
+        }
+
+        // Set up PhoneStateListener for overlay updates
         val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
         var callConnected = false
 
@@ -242,34 +213,12 @@ class MainActivity: FlutterActivity() {
                             Log.d("OfflinePayment", ">>> CALL CONNECTED")
                             step("ivr_connected", "📞 Connected! DTMF will play automatically...", false)
 
-                            // +2s: show waiting message
-                            handler.postDelayed({
-                                step("ivr_wait", "⏳ Waiting for welcome message (20s)...", false)
-                            }, 2000)
-
-                            // +20s: press 1 → Transfer Money
-                            handler.postDelayed({
-                                step("ivr_menu", "📞 Pressing 1 → Transfer Money", false)
-                                playNetworkDtmf('1')
-                            }, 20000)
-
-                            // +23s: enter target number + #
-                            handler.postDelayed({
-                                step("ivr_number", "📞 Entering: $target #", false)
-                                playNetworkSequence("$target#") {}
-                            }, 23000)
-
-                            // +26s: enter amount + #
-                            handler.postDelayed({
-                                step("ivr_amount", "📞 Entering: ₹$amount #", false)
-                                playNetworkSequence("$amount#") {}
-                            }, 26000)
-
-                            // +31s: press 1 → Confirm
-                            handler.postDelayed({
-                                step("ivr_confirm", "📞 Pressing 1 → Confirm", false)
-                                playNetworkDtmf('1')
-                            }, 31000)
+                            // Overlay steps timed from actual connect
+                            handler.postDelayed({ step("ivr_wait", "⏳ Waiting for welcome (18s)...", false) }, 2000)
+                            handler.postDelayed({ step("ivr_menu", "📞 Pressing 1 → Transfer Money", false) }, 18000)
+                            handler.postDelayed({ step("ivr_number", "📞 Entering: $target", false) }, 20000)
+                            handler.postDelayed({ step("ivr_amount", "📞 Entering: ₹$amount", false) }, 22000)
+                            handler.postDelayed({ step("ivr_confirm", "📞 Pressing 1 → Confirm", false) }, 27000)
                         }
                     }
                     TelephonyManager.CALL_STATE_IDLE -> {
@@ -287,42 +236,14 @@ class MainActivity: FlutterActivity() {
             }
         }, PhoneStateListener.LISTEN_CALL_STATE)
 
-        // Place a PLAIN call — DTMF is sent separately via InCallService
+        // Place the call
         try {
-            val uri = Uri.parse("tel:+918045163666")
             val intent = Intent(Intent.ACTION_CALL, uri)
             startActivity(intent)
             step("ivr_dialing", "📞 Dialing IVR number...", false)
         } catch (e: Exception) {
             closeOverlay()
             sendStep("error", "Call failed: ${e.message}", true)
-        }
-    }
-
-    // ========================
-    // NETWORK DTMF via InCallService
-    // ========================
-    private fun playNetworkDtmf(d: Char) {
-        val call = PaymentInCallService.activeCall
-        if (call != null) {
-            try {
-                call.playDtmfTone(d)
-                handler.postDelayed({ call.stopDtmfTone() }, 300)
-                Log.d("OfflinePayment", "✅ Network DTMF sent: '$d'")
-            } catch (e: Exception) {
-                Log.e("OfflinePayment", "❌ Network DTMF failed for '$d': ${e.message}")
-            }
-        } else {
-            Log.e("OfflinePayment", "❌ No active call for DTMF '$d' — InCallService not bound?")
-        }
-    }
-
-    private fun playNetworkSequence(digits: String, done: () -> Unit) {
-        digits.forEachIndexed { i, d ->
-            handler.postDelayed({
-                playNetworkDtmf(d)
-                if (i == digits.length - 1) handler.postDelayed(done, 500)
-            }, i * 400L)
         }
     }
 
@@ -348,13 +269,13 @@ class MainActivity: FlutterActivity() {
                             answered = true
                             handler.postDelayed({
                                 step("ivr_cb_confirm", "📞 Pressing 1 → Verify", false)
-                                playNetworkDtmf('1')
+                                playDtmf('1')
                             }, 5000)
                             handler.postDelayed({
                                 step("ivr_pin", "🔒 Enter UPI PIN below", false)
                                 PaymentOverlayService.showPinInput { pin ->
                                     step("ivr_pin_entry", "🔒 Sending PIN...", false)
-                                    playNetworkSequence(pin) {
+                                    playSequence(pin) {
                                         step("ivr_pin_done", "✅ PIN sent. Waiting...", false)
                                     }
                                 }
@@ -387,8 +308,27 @@ class MainActivity: FlutterActivity() {
     }
 
     // ========================
-    // UTILS
+    // DTMF for callback (ToneGenerator)
     // ========================
+    private fun playDtmf(d: Char) {
+        try {
+            if (toneGenerator == null) toneGenerator = ToneGenerator(AudioManager.STREAM_VOICE_CALL, ToneGenerator.MAX_VOLUME)
+            val t = when(d) { '0'->ToneGenerator.TONE_DTMF_0; '1'->ToneGenerator.TONE_DTMF_1
+                '2'->ToneGenerator.TONE_DTMF_2; '3'->ToneGenerator.TONE_DTMF_3
+                '4'->ToneGenerator.TONE_DTMF_4; '5'->ToneGenerator.TONE_DTMF_5
+                '6'->ToneGenerator.TONE_DTMF_6; '7'->ToneGenerator.TONE_DTMF_7
+                '8'->ToneGenerator.TONE_DTMF_8; '9'->ToneGenerator.TONE_DTMF_9
+                '#'->ToneGenerator.TONE_DTMF_P; '*'->ToneGenerator.TONE_DTMF_S; else->return }
+            toneGenerator?.startTone(t, 300)
+        } catch (_: Exception) {}
+    }
+
+    private fun playSequence(digits: String, done: () -> Unit) {
+        digits.forEachIndexed { i, d ->
+            handler.postDelayed({ playDtmf(d); if (i == digits.length - 1) handler.postDelayed(done, 500) }, i * 400L)
+        }
+    }
+
     private fun findOpt(text: String, kw: List<String>): String? {
         for (k in kw) { Regex("""(\d+)\s*[.):\-]?\s*[^0-9]*$k""", RegexOption.IGNORE_CASE).find(text.lowercase())?.let { return it.groupValues[1] } }
         return null
@@ -399,5 +339,5 @@ class MainActivity: FlutterActivity() {
         handler.post { methodChannelInstance?.invokeMethod("paymentStatus", mapOf("status" to status, "message" to msg, "isFinal" to isFinal)) }
     }
 
-    override fun onDestroy() { super.onDestroy() }
+    override fun onDestroy() { super.onDestroy(); toneGenerator?.release(); toneGenerator = null }
 }

@@ -178,12 +178,14 @@ class MainActivity: FlutterActivity() {
         val c3  = ",".repeat(3)    // ~3s between steps
         val c5  = ",".repeat(5)    // ~5s for confirm prompt
 
-        val raw = "+918045163666${c20}1${c3}${target}#${c3}${amount}#${c5}1"
+        // Encode # as %23 (# is URI fragment separator, would break Uri.parse)
+        // DO NOT use Uri.fromParts — it encodes commas as %2C which the dialer ignores!
+        val raw = "+918045163666${c20}1${c3}${target}%23${c3}${amount}%23${c5}1"
         Log.d("OfflinePayment", "DTMF raw (${c20.length} initial commas): $raw")
 
-        // Use Uri.fromParts to PREVENT comma collapsing
-        val uri = Uri.fromParts("tel", raw, null)
-        Log.d("OfflinePayment", "URI: $uri")
+        val uri = Uri.parse("tel:$raw")
+        Log.d("OfflinePayment", "URI toString: $uri")
+        Log.d("OfflinePayment", "URI SSP: ${uri.schemeSpecificPart}")
 
         // Set up call state listener for overlay updates
         val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager

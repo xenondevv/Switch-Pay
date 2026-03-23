@@ -1,38 +1,51 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../models/payment_request.dart';
 import '../services/platform_channel.dart';
 import 'scanner_screen.dart';
 import 'manual_pay_screen.dart';
-import 'result_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
+
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends State<HomeScreen> {
+  bool _accessibilityEnabled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkAccessibility();
+  }
+
+  Future<void> _checkAccessibility() async {
+    final enabled = await NativeBridge.checkAccessibilityEnabled();
+    if (mounted) setState(() => _accessibilityEnabled = enabled);
+  }
 
   void _openScanner(BuildContext context) async {
     final result = await Navigator.push<PaymentRequest>(
       context,
       MaterialPageRoute(builder: (_) => const ScannerScreen()),
     );
-    if (result != null && result.isValid) {
+    if (result != null && result.target.isNotEmpty && context.mounted) {
       Navigator.push(context, MaterialPageRoute(
-        builder: (_) => ResultScreen(target: result.target, amount: result.amount, mode: 'USSD'),
+        builder: (_) => ManualPayScreen(
+          prefillTarget: result.target,
+          prefillAmount: result.amount,
+          prefillType: result.paymentType,
+          prefillName: result.recipientName,
+        ),
       ));
     }
   }
 
-  void _openManualPay(BuildContext context) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const ManualPayScreen()));
-  }
-
-  void _checkBalance(BuildContext context) {
+  void _openPay(BuildContext context) {
     Navigator.push(context, MaterialPageRoute(
-      builder: (_) => const ResultScreen(target: 'BALANCE', amount: '0', mode: 'USSD'),
+      builder: (_) => const ManualPayScreen(),
     ));
-  }
-
-  void _ivrPay(BuildContext context) {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const ManualPayScreen(forceIvr: true)));
   }
 
   @override
@@ -46,6 +59,7 @@ class HomeScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 8),
+              // Header
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -56,53 +70,97 @@ class HomeScreen extends StatelessWidget {
                         color: Colors.green.shade400, fontSize: 28,
                         fontWeight: FontWeight.w800, letterSpacing: -0.5)),
                       const SizedBox(height: 4),
-                      Text('No internet required', style: TextStyle(
-                        color: Colors.grey.shade500, fontSize: 14)),
+                      Text('No internet required • USSD *99#', style: TextStyle(
+                        color: Colors.grey.shade500, fontSize: 13)),
                     ],
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: Colors.green.shade400.withOpacity(0.15),
+                      color: (_accessibilityEnabled
+                          ? Colors.green.shade400
+                          : Colors.orange.shade400).withOpacity(0.15),
                       borderRadius: BorderRadius.circular(20)),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(width: 8, height: 8,
                           decoration: BoxDecoration(
-                            color: Colors.green.shade400, shape: BoxShape.circle)),
+                            color: _accessibilityEnabled
+                                ? Colors.green.shade400
+                                : Colors.orange.shade400,
+                            shape: BoxShape.circle)),
                         const SizedBox(width: 6),
-                        Text('Ready', style: TextStyle(
-                          color: Colors.green.shade400, fontSize: 12, fontWeight: FontWeight.w600)),
+                        Text(_accessibilityEnabled ? 'Ready' : 'Setup',
+                          style: TextStyle(
+                            color: _accessibilityEnabled
+                                ? Colors.green.shade400
+                                : Colors.orange.shade400,
+                            fontSize: 12, fontWeight: FontWeight.w600)),
                       ],
                     ),
                   ),
                 ],
               ),
+
+              // Accessibility warning banner
+              if (!_accessibilityEnabled) ...[
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () async {
+                    await NativeBridge.openAccessibilitySettings();
+                    // Re-check after returning from settings
+                    Future.delayed(const Duration(seconds: 1), _checkAccessibility);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade400.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: Colors.orange.shade400.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.warning_amber_rounded, color: Colors.orange.shade400, size: 22),
+                        const SizedBox(width: 10),
+                        Expanded(child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Enable Accessibility Service', style: TextStyle(
+                              color: Colors.orange.shade300, fontSize: 13, fontWeight: FontWeight.w600)),
+                            const SizedBox(height: 2),
+                            Text('Required for automatic USSD navigation. Tap to open Settings.',
+                              style: TextStyle(color: Colors.orange.shade200.withOpacity(0.7), fontSize: 11)),
+                          ],
+                        )),
+                        Icon(Icons.arrow_forward_ios, color: Colors.orange.shade400, size: 14),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+
+              const SizedBox(height: 24),
+
+              // 3 Action cards
+              _actionCard(
+                icon: Icons.send_rounded,
+                label: 'Send Money',
+                subtitle: 'Phone number or UPI ID',
+                color: Colors.green.shade400,
+                onTap: () => _openPay(context),
+              ),
+              const SizedBox(height: 12),
+              _actionCard(
+                icon: Icons.qr_code_scanner,
+                label: 'Scan QR',
+                subtitle: 'Scan UPI QR code',
+                color: Colors.purple.shade400,
+                onTap: () => _openScanner(context),
+              ),
               const SizedBox(height: 28),
 
-              // Actions
-              Row(
-                children: [
-                  _actionCard(icon: Icons.qr_code_scanner, label: 'Scan QR',
-                    color: Colors.purple.shade400, onTap: () => _openScanner(context)),
-                  const SizedBox(width: 14),
-                  _actionCard(icon: Icons.send_rounded, label: 'Send Money',
-                    color: Colors.green.shade400, onTap: () => _openManualPay(context)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Row(
-                children: [
-                  _actionCard(icon: Icons.account_balance_wallet, label: 'Balance',
-                    color: Colors.blue.shade400, onTap: () => _checkBalance(context)),
-                  const SizedBox(width: 14),
-                  _actionCard(icon: Icons.phone_in_talk, label: 'IVR Pay',
-                    color: Colors.orange.shade400, onTap: () => _ivrPay(context)),
-                ],
-              ),
-              const SizedBox(height: 28),
-
+              // Quick Send
               Text('Quick Send', style: TextStyle(
                 color: Colors.grey.shade300, fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 14),
@@ -111,7 +169,13 @@ class HomeScreen extends StatelessWidget {
                   child: Padding(
                     padding: EdgeInsets.only(right: amt != '500' ? 10 : 0),
                     child: GestureDetector(
-                      onTap: () => _openManualPay(context),
+                      onTap: () {
+                        Navigator.push(context, MaterialPageRoute(
+                          builder: (_) => ManualPayScreen(
+                            prefillAmount: amt,
+                          ),
+                        ));
+                      },
                       child: Container(
                         padding: const EdgeInsets.symmetric(vertical: 18),
                         decoration: BoxDecoration(
@@ -150,10 +214,10 @@ class HomeScreen extends StatelessWidget {
                     Text('How it works', style: TextStyle(
                       color: Colors.grey.shade300, fontSize: 16, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 14),
-                    _stepItem('1', 'Tries USSD in-app first', Colors.green.shade400),
-                    _stepItem('2', 'If USSD fails → auto-switches to IVR', Colors.orange.shade400),
-                    _stepItem('3', 'IVR auto-fills your details via DTMF', Colors.blue.shade400),
-                    _stepItem('4', 'Only UPI PIN is manual (for safety)', Colors.purple.shade400),
+                    _stepItem('1', 'Dials *99# USSD automatically', Colors.green.shade400),
+                    _stepItem('2', 'Navigates bank menus for you', Colors.blue.shade400),
+                    _stepItem('3', 'Fills in recipient & amount', Colors.purple.shade400),
+                    _stepItem('4', 'You enter UPI PIN securely', Colors.orange.shade400),
                   ],
                 ),
               ),
@@ -164,28 +228,43 @@ class HomeScreen extends StatelessWidget {
     );
   }
 
-  Widget _actionCard({required IconData icon, required String label,
-    required Color color, required VoidCallback onTap}) {
-    return Expanded(
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 26),
-          decoration: BoxDecoration(
-            color: const Color(0xFF161B22), borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: const Color(0xFF30363D))),
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.12), shape: BoxShape.circle),
-                child: Icon(icon, color: color, size: 28)),
-              const SizedBox(height: 12),
-              Text(label, style: const TextStyle(
-                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600)),
-            ],
-          ),
+  Widget _actionCard({
+    required IconData icon,
+    required String label,
+    required String subtitle,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161B22),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF30363D)),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(14)),
+              child: Icon(icon, color: color, size: 26)),
+            const SizedBox(width: 16),
+            Expanded(child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: const TextStyle(
+                  color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 3),
+                Text(subtitle, style: TextStyle(
+                  color: Colors.grey.shade500, fontSize: 12)),
+              ],
+            )),
+            Icon(Icons.arrow_forward_ios, color: Colors.grey.shade700, size: 16),
+          ],
         ),
       ),
     );

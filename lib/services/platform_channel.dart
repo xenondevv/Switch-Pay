@@ -39,19 +39,45 @@ class NativeBridge {
   static Future<String> triggerOfflinePayment({
     required String target,
     required String amount,
-    required String mode,
   }) async {
     try {
       final result = await platform.invokeMethod('executePayment', {
         "target": target,
         "amount": amount,
-        "mode": mode,
       });
       return result.toString();
     } on PlatformException catch (e) {
       return "Error: ${e.message}";
     } catch (e) {
       return "Unexpected error: $e";
+    }
+  }
+
+  /// Send UPI PIN back to native for USSD dialog entry
+  static Future<void> sendUpiPin(String pin) async {
+    try {
+      await platform.invokeMethod('sendUpiPin', {"pin": pin});
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  /// Check if AccessibilityService is enabled
+  static Future<bool> checkAccessibilityEnabled() async {
+    try {
+      final result = await platform.invokeMethod('checkAccessibility');
+      return result == true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /// Open Accessibility Settings
+  static Future<void> openAccessibilitySettings() async {
+    try {
+      await platform.invokeMethod('openAccessibilitySettings');
+    } catch (e) {
+      // ignore
     }
   }
 }

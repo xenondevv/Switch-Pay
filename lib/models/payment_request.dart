@@ -2,11 +2,13 @@ class PaymentRequest {
   final String target;
   final String amount;
   final String? recipientName;
+  final String paymentType; // 'phone' or 'upi'
 
   PaymentRequest({
     required this.target,
     required this.amount,
     this.recipientName,
+    this.paymentType = 'phone',
   });
 
   /// Parse a UPI QR code string like: upi://pay?pa=merchant@upi&pn=Shop&am=100
@@ -16,8 +18,9 @@ class PaymentRequest {
       target: uri.queryParameters['pa'] ?? '',
       amount: uri.queryParameters['am'] ?? '',
       recipientName: uri.queryParameters['pn'],
+      paymentType: 'upi',
     );
   }
 
-  bool get isValid => target.isNotEmpty && amount.isNotEmpty;
+  bool get isValid => target.isNotEmpty;
 }

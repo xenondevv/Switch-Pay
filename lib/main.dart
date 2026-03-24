@@ -1,29 +1,34 @@
 import 'package:flutter/material.dart';
-import 'screens/home_screen.dart';
+import 'screens/splash_screen.dart';
 import 'services/platform_channel.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   NativeBridge.init();
-  runApp(const OfflinePaymentApp());
+  runApp(const SwitchPayApp());
 }
 
-class OfflinePaymentApp extends StatelessWidget {
-  const OfflinePaymentApp({Key? key}) : super(key: key);
+class SwitchPayApp extends StatelessWidget {
+  const SwitchPayApp({Key? key}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Offline Payment Assistant',
+      title: 'Switch Pay',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: const Color(0xFF0D1117),
-        primarySwatch: Colors.green,
+        scaffoldBackgroundColor: Colors.black,
+        primarySwatch: Colors.grey,
         useMaterial3: true,
         fontFamily: 'Roboto',
+        colorScheme: const ColorScheme.dark(
+          primary: Colors.white,
+          secondary: Colors.white70,
+          surface: Color(0xFF111111),
+        ),
       ),
-      home: const HomeScreen(),
+      home: const SplashScreen(),
     );
   }
 }

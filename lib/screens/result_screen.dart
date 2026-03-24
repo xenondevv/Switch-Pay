@@ -43,7 +43,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
       setState(() {
         _steps.add(step);
         if (step.status == 'enter_pin') {
-          _showPinPad = true;
+          // PIN is handled by the native overlay — do NOT show Flutter PIN pad
         }
         if (step.isFinal) {
           _isComplete = true;
@@ -106,7 +106,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
     if (status.contains('error') || status.contains('fail')) return Colors.red.shade400;
     if (status.contains('success')) return Colors.green.shade400;
     if (status.contains('pin')) return Colors.amber.shade400;
-    return Colors.blue.shade400;
+    return Colors.white70;
   }
 
   @override
@@ -114,7 +114,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
     // Show full success/failure screen when complete
     if (_isComplete) {
       return Scaffold(
-        backgroundColor: const Color(0xFF0D1117),
+        backgroundColor: Colors.black,
         body: SafeArea(
           child: _isSuccess ? _buildSuccessScreen() : _buildFailureScreen(),
         ),
@@ -122,7 +122,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
+      backgroundColor: Colors.black,
       body: SafeArea(
         child: Column(
           children: [
@@ -130,7 +130,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             _buildHeader(),
             const SizedBox(height: 16),
             Expanded(
-              child: _showPinPad ? _buildPinPad() : _buildStepList(),
+              child: _buildStepList(),
             ),
             const SizedBox(height: 16),
           ],
@@ -140,7 +140,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
   }
 
   Widget _buildHeader() {
-    Color headerColor = Colors.blue.shade400;
+    Color headerColor = Colors.white70;
     IconData headerIcon = Icons.cell_tower_rounded;
     String headerText = 'Processing via USSD';
 
@@ -166,10 +166,10 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
       decoration: BoxDecoration(
         gradient: LinearGradient(
           begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [headerColor.withOpacity(0.15), const Color(0xFF161B22)],
+          colors: [headerColor.withOpacity(0.1), const Color(0xFF111111)],
         ),
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: headerColor.withOpacity(0.3)),
+        border: Border.all(color: headerColor.withOpacity(0.25)),
       ),
       child: Column(
         children: [
@@ -185,7 +185,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: headerColor.withOpacity(0.15),
+                    color: headerColor.withOpacity(0.12),
                   ),
                   child: Icon(headerIcon, color: headerColor, size: 36),
                 ),
@@ -209,13 +209,13 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
             decoration: BoxDecoration(
-              color: Colors.green.shade400.withOpacity(0.1),
+              color: Colors.white.withOpacity(0.08),
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Text(
+            child: const Text(
               '📱 USSD *99#',
               style: TextStyle(
-                color: Colors.green.shade400,
+                color: Colors.white70,
                 fontSize: 11, fontWeight: FontWeight.w600),
             ),
           ),
@@ -230,8 +230,8 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            SizedBox(width: 32, height: 32,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue.shade400)),
+            const SizedBox(width: 32, height: 32,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)),
             const SizedBox(height: 12),
             Text('Initiating USSD...', style: TextStyle(color: Colors.grey.shade500)),
           ],
@@ -248,8 +248,8 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             padding: const EdgeInsets.symmetric(vertical: 12),
             child: Row(
               children: [
-                SizedBox(width: 18, height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.blue.shade400)),
+                const SizedBox(width: 18, height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70)),
                 const SizedBox(width: 14),
                 Text('Waiting for USSD response...', style: TextStyle(
                   color: Colors.grey.shade500, fontSize: 13)),
@@ -273,11 +273,11 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                   Container(
                     padding: const EdgeInsets.all(5),
                     decoration: BoxDecoration(
-                      color: color.withOpacity(0.15), shape: BoxShape.circle),
+                      color: color.withOpacity(0.12), shape: BoxShape.circle),
                     child: Icon(icon, color: color, size: 14),
                   ),
                   if (!isLast || !_isComplete)
-                    Container(width: 2, height: 24, color: const Color(0xFF30363D)),
+                    Container(width: 2, height: 24, color: Colors.grey.shade800),
                 ],
               ),
               const SizedBox(width: 12),
@@ -286,11 +286,11 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF161B22),
+                    color: const Color(0xFF111111),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: isLast && !_isComplete
-                          ? color.withOpacity(0.4) : const Color(0xFF30363D)),
+                          ? color.withOpacity(0.35) : Colors.grey.shade800),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -323,7 +323,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 24),
             decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
+              color: const Color(0xFF111111),
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: Colors.amber.shade400.withOpacity(0.4)),
             ),
@@ -347,11 +347,11 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                     decoration: BoxDecoration(
                       color: i < _currentPin.length
                           ? Colors.amber.shade400.withOpacity(0.2)
-                          : const Color(0xFF0D1117),
+                          : Colors.black,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: i < _currentPin.length
-                            ? Colors.amber.shade400 : const Color(0xFF30363D),
+                            ? Colors.amber.shade400 : Colors.grey.shade800,
                         width: 1.5),
                     ),
                     child: Center(
@@ -389,18 +389,18 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                       onPressed: () => _onPinKeyPress(key),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: key == '✓'
-                            ? (_currentPin.length >= 4 ? Colors.green.shade400.withOpacity(0.2) : const Color(0xFF161B22))
+                            ? (_currentPin.length >= 4 ? Colors.white.withOpacity(0.15) : const Color(0xFF111111))
                             : key == '⌫'
                                 ? Colors.red.shade400.withOpacity(0.1)
-                                : const Color(0xFF161B22),
+                                : const Color(0xFF111111),
                         foregroundColor: key == '✓'
-                            ? (_currentPin.length >= 4 ? Colors.green.shade400 : Colors.grey.shade700)
+                            ? (_currentPin.length >= 4 ? Colors.white : Colors.grey.shade700)
                             : key == '⌫'
                                 ? Colors.red.shade400
                                 : Colors.white,
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12),
-                          side: const BorderSide(color: Color(0xFF30363D)),
+                          side: BorderSide(color: Colors.grey.shade800),
                         ),
                         elevation: 0,
                       ),
@@ -432,7 +432,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
       child: Column(
         children: [
           const SizedBox(height: 48),
-          // Big green circle checkmark
+          // Big checkmark
           Container(
             width: 100, height: 100,
             decoration: BoxDecoration(
@@ -441,7 +441,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                 begin: Alignment.topLeft, end: Alignment.bottomRight,
                 colors: [Colors.green.shade400, Colors.green.shade700]),
               boxShadow: [
-                BoxShadow(color: Colors.green.shade400.withOpacity(0.4),
+                BoxShadow(color: Colors.green.shade400.withOpacity(0.3),
                   blurRadius: 30, spreadRadius: 5),
               ],
             ),
@@ -460,9 +460,9 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             width: double.infinity,
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFF161B22),
+              color: const Color(0xFF111111),
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: const Color(0xFF30363D)),
+              border: Border.all(color: Colors.grey.shade800),
             ),
             child: Column(
               children: [
@@ -476,10 +476,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
                 _detailRow(Icons.phone_android_rounded, 'Method', 'USSD *99#'),
                 _divider(),
                 _detailRow(Icons.access_time_rounded, 'Time', '$timeStr • $dateStr'),
-                if (_finalMessage.isNotEmpty && _finalMessage != '✅ Payment successful!') ...[
-                  _divider(),
-                  _detailRow(Icons.info_outline_rounded, 'Status', _finalMessage.replaceAll('✅ ', '')),
-                ],
+
               ],
             ),
           ),
@@ -489,16 +486,16 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.green.shade400.withOpacity(0.08),
+              color: Colors.white.withOpacity(0.06),
               borderRadius: BorderRadius.circular(20),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.wifi_off_rounded, color: Colors.green.shade400, size: 14),
+                const Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 14),
                 const SizedBox(width: 6),
-                Text('Completed without internet', style: TextStyle(
-                  color: Colors.green.shade400, fontSize: 12, fontWeight: FontWeight.w600)),
+                const Text('Completed without internet', style: TextStyle(
+                  color: Colors.white70, fontSize: 12, fontWeight: FontWeight.w600)),
               ],
             ),
           ),
@@ -510,7 +507,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             child: ElevatedButton(
               onPressed: () => Navigator.of(context).popUntil((route) => route.isFirst),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade400,
+                backgroundColor: Colors.white,
                 foregroundColor: Colors.black,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
@@ -537,7 +534,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
               shape: BoxShape.circle,
               color: Colors.red.shade400,
               boxShadow: [
-                BoxShadow(color: Colors.red.shade400.withOpacity(0.4),
+                BoxShadow(color: Colors.red.shade400.withOpacity(0.3),
                   blurRadius: 30, spreadRadius: 5),
               ],
             ),
@@ -558,9 +555,9 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
               width: double.infinity,
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.red.shade400.withOpacity(0.08),
+                color: Colors.red.shade400.withOpacity(0.06),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.red.shade400.withOpacity(0.3)),
+                border: Border.all(color: Colors.red.shade400.withOpacity(0.25)),
               ),
               child: Text(_finalMessage.replaceAll('❌ ', ''),
                 style: TextStyle(color: Colors.red.shade300, fontSize: 13, height: 1.4),
@@ -601,15 +598,17 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
             child: Icon(icon, color: Colors.grey.shade400, size: 18),
           ),
           const SizedBox(width: 14),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(label, style: TextStyle(
-                color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w500)),
-              const SizedBox(height: 3),
-              Text(value, style: const TextStyle(
-                color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, height: 1.4)),
-            ],
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(label, style: TextStyle(
+                  color: Colors.grey.shade600, fontSize: 12, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 3),
+                Text(value, style: const TextStyle(
+                  color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600, height: 1.4)),
+              ],
+            ),
           ),
         ],
       ),
@@ -617,7 +616,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
   }
 
   Widget _divider() {
-    return Divider(color: const Color(0xFF30363D), height: 1, thickness: 0.5);
+    return Divider(color: Colors.grey.shade800, height: 1, thickness: 0.5);
   }
 
   String _formatTime(DateTime time) {

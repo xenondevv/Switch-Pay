@@ -1,12 +1,15 @@
 package com.example.offline_payment_app.engine
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.view.accessibility.AccessibilityWindowInfo
 
 class UssdAccessibilityService : AccessibilityService() {
 
@@ -50,16 +53,16 @@ class UssdAccessibilityService : AccessibilityService() {
 
         if (combinedText.length < 5) return
 
-        // Deduplicate events (same text within 1.5 seconds)
+        // Deduplicate events (same text within 800ms — fast to reduce dialog flash)
         val now = System.currentTimeMillis()
         val textKey = combinedText.take(80)
-        if (textKey == lastEventText && (now - lastEventTime) < 1500) return
+        if (textKey == lastEventText && (now - lastEventTime) < 800) return
         lastEventText = textKey
         lastEventTime = now
 
         Log.d(TAG, "Event [state=${FlowStateMachine.state}]: ${combinedText.take(100)}")
 
-        // Delay to let dialogs fully render before interacting
+        // Delay to let dialogs render before interacting (reduced to minimize flash)
         isProcessing = true
         handler.postDelayed({
             try {
@@ -68,7 +71,7 @@ class UssdAccessibilityService : AccessibilityService() {
                 Log.e(TAG, "Error processing USSD: ${e.message}")
             }
             isProcessing = false
-        }, 800)
+        }, 200)
     }
 
     override fun onInterrupt() {
@@ -81,75 +84,160 @@ class UssdAccessibilityService : AccessibilityService() {
 
     /**
      * Types a value into the USSD dialog's EditText and clicks Send/Reply.
-     * Uses longer delays for reliability.
+     * Searches ALL windows (not just rootInActiveWindow) to find the USSD EditText
+     * even when overlay is covering it.
      */
     fun sendInput(value: String) {
         Log.d(TAG, ">>> sendInput: '$value'")
+        attemptSendInput(value, 0)
+    }
 
+    private fun attemptSendInput(value: String, attempt: Int) {
+        if (attempt >= 5) {
+            Log.e(TAG, "sendInput FAILED after 5 attempts for '$value'")
+            return
+        }
+
+        val delay = if (attempt == 0) 300L else 500L
         handler.postDelayed({
-            val rootNode = rootInActiveWindow
-            if (rootNode == null) {
-                Log.e(TAG, "rootInActiveWindow is null — retrying in 500ms")
-                handler.postDelayed({ retrySendInput(value) }, 500)
-                return@postDelayed
-            }
-
-            val editText = findEditTextNode(rootNode)
+            val editText = findEditTextInAllWindows()
             if (editText != null) {
-                // Clear existing text and set new value
                 val args = Bundle()
                 args.putCharSequence(
                     AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value
                 )
                 val setResult = editText.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-                Log.d(TAG, "Text set '$value': $setResult")
+                Log.d(TAG, "Text set '$value' (attempt $attempt): $setResult")
 
                 // Wait for text to be set, then click Send
                 handler.postDelayed({
                     clickSendButton()
-                }, 700)
+                }, 500)
             } else {
-                Log.e(TAG, "No EditText found — retrying in 500ms")
-                handler.postDelayed({ retrySendInput(value) }, 500)
+                Log.w(TAG, "No EditText found (attempt $attempt) — retrying...")
+                attemptSendInput(value, attempt + 1)
             }
-        }, 400)
+        }, delay)
     }
 
-    private fun retrySendInput(value: String) {
-        val rootNode = rootInActiveWindow
-        if (rootNode == null) {
-            Log.e(TAG, "Retry: rootInActiveWindow still null")
-            return
+    /**
+     * Search ALL accessibility windows for an EditText node.
+     * This is critical when our overlay covers the USSD dialog,
+     * since rootInActiveWindow may return the overlay instead.
+     */
+    private fun findEditTextInAllWindows(): AccessibilityNodeInfo? {
+        // First try rootInActiveWindow (fastest path)
+        val activeRoot = rootInActiveWindow
+        if (activeRoot != null) {
+            val found = findEditTextNode(activeRoot)
+            if (found != null) {
+                Log.d(TAG, "Found EditText in active window")
+                return found
+            }
         }
-        val editText = findEditTextNode(rootNode)
-        if (editText != null) {
-            val args = Bundle()
-            args.putCharSequence(
-                AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, value
-            )
-            editText.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)
-            Log.d(TAG, "Retry: Text set '$value'")
-            handler.postDelayed({ clickSendButton() }, 700)
-        } else {
-            Log.e(TAG, "Retry: No EditText found")
+
+        // Search all windows — the USSD dialog might not be the active one
+        try {
+            val windowList = windows
+            if (windowList != null) {
+                for (window in windowList) {
+                    val root = window.root ?: continue
+                    val found = findEditTextNode(root)
+                    if (found != null) {
+                        Log.d(TAG, "Found EditText in window: ${window.type}")
+                        return found
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error searching windows: ${e.message}")
         }
+
+        return null
     }
 
     private fun clickSendButton() {
-        val root = rootInActiveWindow ?: return
-        val clicked = clickButton(root, "Send") ||
+        // Search all windows for the Send button too
+        val roots = getAllWindowRoots()
+        var clicked = false
+        for (root in roots) {
+            clicked = clickButton(root, "Send") ||
                       clickButton(root, "Reply") ||
                       clickButton(root, "Ok") ||
                       clickButton(root, "OK") ||
                       clickButton(root, "Submit") ||
                       clickButton(root, "SEND") ||
                       clickButton(root, "send")
+            if (clicked) break
+        }
         Log.d(TAG, "Send button clicked: $clicked")
         if (!clicked) {
-            // Try clicking by position — some devices have non-standard USSD dialogs
-            Log.w(TAG, "Could not find Send button by text, trying alternatives")
-            clickAnyButton(root)
+            for (root in roots) {
+                if (clickAnyButton(root)) break
+            }
         }
+    }
+
+    /**
+     * Get root nodes from ALL windows for multi-window search.
+     */
+    private fun getAllWindowRoots(): List<AccessibilityNodeInfo> {
+        val roots = mutableListOf<AccessibilityNodeInfo>()
+        val activeRoot = rootInActiveWindow
+        if (activeRoot != null) roots.add(activeRoot)
+
+        try {
+            val windowList = windows
+            if (windowList != null) {
+                for (window in windowList) {
+                    val root = window.root ?: continue
+                    if (root != activeRoot) roots.add(root)
+                }
+            }
+        } catch (_: Exception) {}
+
+        return roots
+    }
+
+    /**
+     * Click the OK button on an info-only USSD dialog (no EditText, no input needed).
+     * Used for welcome screens, confirmation messages, etc.
+     */
+    fun clickOkButton() {
+        Log.d(TAG, ">>> clickOkButton (info-only dialog)")
+        handler.postDelayed({
+            val root = rootInActiveWindow
+            if (root == null) {
+                Log.e(TAG, "clickOkButton: rootInActiveWindow is null — retrying in 400ms")
+                handler.postDelayed({ retryClickOkButton() }, 400)
+                return@postDelayed
+            }
+            val clicked = clickButton(root, "OK") ||
+                          clickButton(root, "Ok") ||
+                          clickButton(root, "ok") ||
+                          clickButton(root, "Send") ||
+                          clickButton(root, "Reply") ||
+                          clickButton(root, "Next")
+            Log.d(TAG, "OK button clicked: $clicked")
+            if (!clicked) {
+                Log.w(TAG, "Could not find OK button, trying any button")
+                clickAnyButton(root)
+            }
+        }, 300)
+    }
+
+    private fun retryClickOkButton() {
+        val root = rootInActiveWindow
+        if (root == null) {
+            Log.e(TAG, "retryClickOkButton: rootInActiveWindow still null")
+            return
+        }
+        val clicked = clickButton(root, "OK") ||
+                      clickButton(root, "Ok") ||
+                      clickButton(root, "ok") ||
+                      clickButton(root, "Send") ||
+                      clickAnyButton(root)
+        Log.d(TAG, "Retry OK button clicked: $clicked")
     }
 
     /**
@@ -164,7 +252,7 @@ class UssdAccessibilityService : AccessibilityService() {
                             clickButton(root, "Close") ||
                             clickButton(root, "Dismiss")
             Log.d(TAG, "Dismiss dialog: $dismissed")
-        }, 500)
+        }, 400)
     }
 
     // ========================

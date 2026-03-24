@@ -85,10 +85,10 @@ class _ScannerScreenState extends State<ScannerScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text('Scan QR Code'),
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: const Color(0xFF111111),
         foregroundColor: Colors.white,
         elevation: 0,
         actions: [
@@ -115,12 +115,12 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       onDetect: _onDetect,
                     ),
                   ),
-                  // Overlay frame
+                  // Overlay frame — white border
                   Center(
                     child: Container(
                       width: 220, height: 220,
                       decoration: BoxDecoration(
-                        border: Border.all(color: Colors.green.shade400, width: 2),
+                        border: Border.all(color: Colors.white, width: 2),
                         borderRadius: BorderRadius.circular(16),
                       ),
                     ),
@@ -135,7 +135,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                         decoration: BoxDecoration(
                           color: Colors.black54,
                           borderRadius: BorderRadius.circular(12)),
-                        child: Icon(Icons.flash_on, color: Colors.white, size: 22),
+                        child: const Icon(Icons.flash_on, color: Colors.white, size: 22),
                       ),
                     ),
                   ),
@@ -151,7 +151,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                         child: Text(
                           _hasScanned ? '✅ QR Detected' : 'Point at UPI QR code',
                           style: TextStyle(
-                            color: _hasScanned ? Colors.green.shade300 : Colors.white,
+                            color: _hasScanned ? Colors.white : Colors.grey.shade300,
                             fontSize: 13, fontWeight: FontWeight.w500),
                         ),
                       ),
@@ -177,16 +177,16 @@ class _ScannerScreenState extends State<ScannerScreen> {
                       hintText: 'upi://pay?pa=merchant@upi&pn=Shop&am=100',
                       hintStyle: TextStyle(color: Colors.grey.shade700, fontSize: 12),
                       filled: true,
-                      fillColor: const Color(0xFF161B22),
+                      fillColor: const Color(0xFF111111),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF30363D))),
+                        borderSide: BorderSide(color: Colors.grey.shade800)),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF30363D))),
+                        borderSide: BorderSide(color: Colors.grey.shade800)),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: Colors.green.shade400)),
+                        borderSide: const BorderSide(color: Colors.white)),
                     ),
                   ),
                   const SizedBox(height: 12),
@@ -195,8 +195,8 @@ class _ScannerScreenState extends State<ScannerScreen> {
                     child: ElevatedButton(
                       onPressed: _parseManual,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF238636),
-                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: const Text('Parse QR', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -227,19 +227,19 @@ class _ScannerScreenState extends State<ScannerScreen> {
         Container(
           padding: const EdgeInsets.all(20),
           decoration: BoxDecoration(
-            color: const Color(0xFF161B22),
+            color: const Color(0xFF111111),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.green.shade800),
+            border: Border.all(color: Colors.white.withOpacity(0.3)),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  Icon(Icons.check_circle, color: Colors.green.shade400, size: 22),
+                  const Icon(Icons.check_circle, color: Colors.white, size: 22),
                   const SizedBox(width: 8),
-                  Text('QR Parsed Successfully', style: TextStyle(
-                    color: Colors.green.shade400, fontWeight: FontWeight.w700, fontSize: 16)),
+                  const Text('QR Parsed Successfully', style: TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.w700, fontSize: 16)),
                 ],
               ),
               const SizedBox(height: 16),
@@ -276,7 +276,7 @@ class _ScannerScreenState extends State<ScannerScreen> {
                 child: ElevatedButton(
                   onPressed: _proceedToPayment,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade400,
+                    backgroundColor: Colors.white,
                     foregroundColor: Colors.black,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   ),
@@ -295,9 +295,9 @@ class _ScannerScreenState extends State<ScannerScreen> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF161B22),
+        color: const Color(0xFF111111),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF30363D)),
+        border: Border.all(color: Colors.grey.shade800),
       ),
       child: Column(
         children: [

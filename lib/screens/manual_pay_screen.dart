@@ -38,11 +38,11 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
     final amount = _amountController.text.trim();
 
     if (target.isEmpty) {
-      _showError('Enter phone number or UPI ID');
+      _showError('Enter a UPI ID');
       return;
     }
-    if (target.length < 3) {
-      _showError('Enter a valid phone number or UPI ID');
+    if (target.length < 3 || !target.contains('@')) {
+      _showError('Enter a valid UPI ID (e.g. name@bank)');
       return;
     }
     if (amount.isEmpty || int.tryParse(amount) == null || int.parse(amount) <= 0) {
@@ -71,10 +71,10 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0D1117),
+      backgroundColor: Colors.black,
       appBar: AppBar(
         title: const Text('Send Money'),
-        backgroundColor: const Color(0xFF161B22),
+        backgroundColor: const Color(0xFF111111),
         foregroundColor: Colors.white,
         elevation: 0,
       ),
@@ -88,17 +88,17 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.green.shade400.withOpacity(0.08),
+                  color: Colors.white.withOpacity(0.05),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.green.shade400.withOpacity(0.2)),
+                  border: Border.all(color: Colors.white.withOpacity(0.15)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.qr_code, color: Colors.green.shade400, size: 18),
+                    Icon(Icons.qr_code, color: Colors.white70, size: 18),
                     const SizedBox(width: 8),
                     Expanded(child: Text(
                       'QR Scanned: ${widget.prefillName}',
-                      style: TextStyle(color: Colors.green.shade300, fontSize: 12),
+                      style: const TextStyle(color: Colors.white70, fontSize: 12),
                     )),
                   ],
                 ),
@@ -106,8 +106,8 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
               const SizedBox(height: 16),
             ],
 
-            // Recipient — single field accepting both phone and UPI
-            Text('Phone Number or UPI ID', style: TextStyle(
+            // Recipient
+            Text('UPI ID', style: TextStyle(
               color: Colors.grey.shade300, fontSize: 14, fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
             TextField(
@@ -115,22 +115,22 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
               style: const TextStyle(color: Colors.white, fontSize: 16),
               keyboardType: TextInputType.text,
               decoration: InputDecoration(
-                hintText: 'e.g. 9876543210 or name@bank',
+                hintText: 'e.g. name@sbi or name@ybl',
                 hintStyle: TextStyle(color: Colors.grey.shade700),
                 prefixIcon: Icon(Icons.person_outline, color: Colors.grey.shade500),
                 filled: true,
-                fillColor: const Color(0xFF161B22),
+                fillColor: const Color(0xFF111111),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF30363D))),
+                  borderSide: BorderSide(color: Colors.grey.shade800)),
                 enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: const BorderSide(color: Color(0xFF30363D))),
+                  borderSide: BorderSide(color: Colors.grey.shade800)),
                 focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide(color: Colors.green.shade400)),
+                  borderSide: const BorderSide(color: Colors.white)),
               ),
             ),
             const SizedBox(height: 6),
             Text(
-              'USSD *99# accepts both phone numbers and UPI IDs',
+              'USSD *99# option 1 (Mobile No.) accepts UPI IDs',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
             ),
             const SizedBox(height: 24),
@@ -148,15 +148,15 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
                 hintText: '0',
                 hintStyle: TextStyle(color: Colors.grey.shade700, fontSize: 28),
                 prefixText: '₹ ',
-                prefixStyle: TextStyle(color: Colors.green.shade400, fontSize: 28, fontWeight: FontWeight.w700),
+                prefixStyle: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w700),
                 filled: true,
-                fillColor: const Color(0xFF161B22),
+                fillColor: const Color(0xFF111111),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0xFF30363D))),
+                  borderSide: BorderSide(color: Colors.grey.shade800)),
                 enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
-                  borderSide: const BorderSide(color: Color(0xFF30363D))),
+                  borderSide: BorderSide(color: Colors.grey.shade800)),
                 focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.green.shade400)),
+                  borderSide: const BorderSide(color: Colors.white)),
               ),
             ),
             const SizedBox(height: 16),
@@ -171,15 +171,15 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                   decoration: BoxDecoration(
                     color: _amountController.text == amt
-                        ? Colors.green.shade400.withOpacity(0.2)
-                        : const Color(0xFF161B22),
+                        ? Colors.white.withOpacity(0.15)
+                        : const Color(0xFF111111),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
                       color: _amountController.text == amt
-                          ? Colors.green.shade400 : const Color(0xFF30363D)),
+                          ? Colors.white : Colors.grey.shade800),
                   ),
                   child: Text('₹$amt', style: TextStyle(
-                    color: _amountController.text == amt ? Colors.green.shade400 : Colors.white,
+                    color: _amountController.text == amt ? Colors.white : Colors.grey.shade300,
                     fontWeight: FontWeight.w600, fontSize: 15)),
                 ),
               )).toList(),
@@ -192,7 +192,7 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
               child: ElevatedButton(
                 onPressed: _sendPayment,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade400,
+                  backgroundColor: Colors.white,
                   foregroundColor: Colors.black,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                   elevation: 0,
@@ -214,16 +214,16 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.blue.shade400.withOpacity(0.06),
+                color: Colors.white.withOpacity(0.04),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline, color: Colors.blue.shade400, size: 16),
+                  Icon(Icons.info_outline, color: Colors.grey.shade500, size: 16),
                   const SizedBox(width: 8),
                   Expanded(child: Text(
                     'Uses USSD *99# — works without internet',
-                    style: TextStyle(color: Colors.blue.shade300, fontSize: 11),
+                    style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
                   )),
                 ],
               ),

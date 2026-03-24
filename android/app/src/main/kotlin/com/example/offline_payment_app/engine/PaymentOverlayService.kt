@@ -4,6 +4,7 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.Service
+import android.animation.ValueAnimator
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
@@ -19,9 +20,10 @@ import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.view.animation.AccelerateDecelerateInterpolator
+import android.view.animation.OvershootInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
-import android.widget.ScrollView
 import android.widget.TextView
 
 /**
@@ -57,11 +59,13 @@ class PaymentOverlayService : Service() {
 
     private var windowManager: WindowManager? = null
     private var overlayView: View? = null
-    private var stepsContainer: LinearLayout? = null
     private var headerText: TextView? = null
-    private var scrollView: ScrollView? = null
     private var contentFrame: FrameLayout? = null
     private var stepsSection: LinearLayout? = null
+    private var progressBarFg: View? = null
+    private var statusText: TextView? = null
+    private var statusIcon: TextView? = null
+    private var currentProgress: Float = 0f
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -129,36 +133,131 @@ class PaymentOverlayService : Service() {
             setBackgroundColor(Color.parseColor("#FF0D1117"))
         }
 
-        // Steps section (default view)
+        // Processing section (centered progress bar layout)
         stepsSection = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(60), dp(24), dp(24))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(32), dp(80), dp(32), dp(32))
+            setBackgroundColor(Color.parseColor("#FF0D1117"))
         }
 
+        // Pulsing icon
+        statusIcon = TextView(this).apply {
+            text = "📡"
+            textSize = 48f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(20))
+        }
+        stepsSection!!.addView(statusIcon)
+
+        // Header
         headerText = TextView(this).apply {
-            text = "📡 Processing Payment"
-            setTextColor(Color.parseColor("#66BB6A"))
-            textSize = 22f
+            text = "Processing Payment"
+            setTextColor(Color.WHITE)
+            textSize = 24f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            setPadding(0, 0, 0, dp(8))
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(6))
         }
         stepsSection!!.addView(headerText)
 
+        // Subtitle
         val subtitle = TextView(this).apply {
-            text = "USSD *99# running • Do not close"
-            setTextColor(Color.parseColor("#757575"))
+            text = "USSD *99# • Do not close"
+            setTextColor(Color.parseColor("#666666"))
             textSize = 12f
-            setPadding(0, 0, 0, dp(16))
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(32))
         }
         stepsSection!!.addView(subtitle)
 
-        scrollView = ScrollView(this).apply {
+        // Amount card
+        val amountCard = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#161B22"))
+                cornerRadius = dp(16).toFloat()
+                setStroke(dp(1), Color.parseColor("#30363D"))
+            }
+            setPadding(dp(24), dp(20), dp(24), dp(20))
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT)
+            lp.bottomMargin = dp(32)
+            layoutParams = lp
+        }
+
+        val amountLabel = TextView(this).apply {
+            text = "₹${FlowStateMachine.targetAmount}"
+            setTextColor(Color.WHITE)
+            textSize = 36f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+        }
+        amountCard.addView(amountLabel)
+
+        val toLabel = TextView(this).apply {
+            text = "To: ${FlowStateMachine.targetAccount}"
+            setTextColor(Color.parseColor("#9E9E9E"))
+            textSize = 13f
+            gravity = Gravity.CENTER
+            setPadding(0, dp(4), 0, 0)
+        }
+        amountCard.addView(toLabel)
+        stepsSection!!.addView(amountCard)
+
+        // Progress bar container
+        val progressContainer = FrameLayout(this).apply {
+            val lp = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(6))
+            lp.bottomMargin = dp(20)
+            layoutParams = lp
+        }
+
+        // Background track
+        val progressBg = View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#1A1F2B"))
+                cornerRadius = dp(3).toFloat()
+            }
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT)
+        }
+        progressContainer.addView(progressBg)
+
+        // Foreground fill
+        progressBarFg = View(this).apply {
+            background = GradientDrawable().apply {
+                setColor(Color.parseColor("#42A5F5"))
+                cornerRadius = dp(3).toFloat()
+            }
+            layoutParams = FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT)
+            scaleX = 0.05f
+            pivotX = 0f  // Scale from left edge
+        }
+        progressContainer.addView(progressBarFg)
+        stepsSection!!.addView(progressContainer)
+
+        // Status text
+        statusText = TextView(this).apply {
+            text = "📡 Dialing *99#..."
+            setTextColor(Color.parseColor("#BDBDBD"))
+            textSize = 14f
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(8))
+        }
+        stepsSection!!.addView(statusText)
+
+        // Spacer
+        val spacer = View(this).apply {
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f)
         }
-        stepsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
-        scrollView!!.addView(stepsContainer)
-        stepsSection!!.addView(scrollView)
+        stepsSection!!.addView(spacer)
 
         // Cancel button
         val cancelBtn = TextView(this).apply {
@@ -209,54 +308,67 @@ class PaymentOverlayService : Service() {
     // ========================
 
     private fun addStepInternal(status: String, message: String, isFinal: Boolean) {
-        val dotColor = when {
+        // Map status to progress percentage
+        val targetProgress = when {
+            status.contains("dialing") -> 0.05f
+            status.contains("welcome") -> 0.15f
+            status.contains("bank_menu") || status.contains("info") -> 0.25f
+            status.contains("select_method") -> 0.40f
+            status.contains("entering_number") -> 0.55f
+            status.contains("entering_amount") -> 0.70f
+            status.contains("skipping_remark") -> 0.80f
+            status.contains("pin_prompt") || status.contains("enter_pin") -> 0.90f
+            status.contains("pin_entering") -> 0.95f
+            status.contains("success") || status.contains("error") -> 1.0f
+            else -> (currentProgress + 0.05f).coerceAtMost(0.95f)
+        }
+
+        // Animate progress bar
+        animateProgressTo(targetProgress)
+
+        // Update status text
+        statusText?.text = message
+
+        // Update icon and color based on status
+        val color = when {
             status.contains("error") || status.contains("fail") -> "#EF5350"
             status.contains("success") -> "#66BB6A"
             status.contains("pin") -> "#FFA726"
             else -> "#42A5F5"
         }
+        (progressBarFg?.background as? GradientDrawable)?.setColor(Color.parseColor(color))
 
-        val row = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(0, dp(4), 0, dp(4))
-            gravity = Gravity.TOP
+        // Update header icon
+        val icon = when {
+            status.contains("pin") -> "🔒"
+            status.contains("success") -> "✅"
+            status.contains("error") || status.contains("fail") -> "❌"
+            status.contains("amount") || status.contains("paying") -> "💰"
+            else -> "📡"
         }
-
-        val dot = View(this).apply {
-            background = GradientDrawable().apply {
-                shape = GradientDrawable.OVAL
-                setColor(Color.parseColor(dotColor))
-            }
-            layoutParams = LinearLayout.LayoutParams(dp(8), dp(8)).apply {
-                topMargin = dp(5); rightMargin = dp(10)
-            }
-        }
-        row.addView(dot)
-
-        val card = TextView(this).apply {
-            text = message
-            setTextColor(if (isFinal) Color.WHITE else Color.parseColor("#BDBDBD"))
-            textSize = 12f
-            if (isFinal) typeface = Typeface.DEFAULT_BOLD
-            background = GradientDrawable().apply {
-                setColor(Color.parseColor("#1A1F2B"))
-                cornerRadius = dp(8).toFloat()
-                setStroke(dp(1), Color.parseColor(if (isFinal) dotColor else "#30363D"))
-            }
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
-        }
-        row.addView(card)
-        stepsContainer?.addView(row)
-        scrollView?.post { scrollView?.fullScroll(ScrollView.FOCUS_DOWN) }
+        statusIcon?.text = icon
 
         if (isFinal) {
             headerText?.text = when {
-                status.contains("success") -> "✅ Payment Complete"
-                status.contains("error") || status.contains("fail") -> "❌ Payment Failed"
-                else -> "✅ Done"
+                status.contains("success") -> "Payment Complete"
+                status.contains("error") || status.contains("fail") -> "Payment Failed"
+                else -> "Done"
             }
         }
+    }
+
+    private fun animateProgressTo(target: Float) {
+        val bar = progressBarFg ?: return
+        ValueAnimator.ofFloat(currentProgress, target).apply {
+            duration = 400
+            interpolator = AccelerateDecelerateInterpolator()
+            addUpdateListener {
+                val value = it.animatedValue as Float
+                bar.scaleX = value
+            }
+            start()
+        }
+        currentProgress = target
     }
 
     // ========================
@@ -380,14 +492,24 @@ class PaymentOverlayService : Service() {
                             }
                             "✓" -> {
                                 if (currentPin.length >= 4) {
-                                    // Submit PIN!
-                                    FlowStateMachine.setPinFromFlutter(currentPin)
-                                    // Show processing state
+                                    // FIRST: Make overlay non-focusable so rootInActiveWindow
+                                    // returns the USSD dialog, not the overlay
                                     contentFrame?.visibility = View.GONE
                                     stepsSection?.visibility = View.VISIBLE
-                                    headerText?.text = "🔒 Verifying PIN..."
-                                    headerText?.setTextColor(Color.parseColor("#FFA726"))
+                                    headerText?.text = "Verifying PIN..."
+                                    headerText?.setTextColor(Color.WHITE)
+                                    statusIcon?.text = "🔒"
+                                    statusText?.text = "🔒 Verifying UPI PIN..."
+                                    animateProgressTo(0.95f)
+                                    (progressBarFg?.background as? GradientDrawable)?.setColor(Color.parseColor("#FFA726"))
                                     updateOverlayFlags(touchable = false)
+
+                                    // THEN: Delay PIN entry to let window manager refocus
+                                    // on the USSD dialog behind the overlay
+                                    val pinToSend = currentPin
+                                    handler.postDelayed({
+                                        FlowStateMachine.setPinFromFlutter(pinToSend)
+                                    }, 1000)
                                 }
                             }
                             else -> {
@@ -414,6 +536,9 @@ class PaymentOverlayService : Service() {
     private fun showSuccessInternal(message: String) {
         updateOverlayFlags(touchable = true)
 
+        // Dismiss the USSD dialog behind the overlay so it's not visible
+        UssdAccessibilityService.instance?.dismissDialog()
+
         stepsSection?.visibility = View.GONE
         contentFrame?.visibility = View.VISIBLE
         contentFrame?.removeAllViews()
@@ -425,7 +550,7 @@ class PaymentOverlayService : Service() {
             setBackgroundColor(Color.parseColor("#FF0D1117"))
         }
 
-        // Green circle with checkmark
+        // Green circle with checkmark — starts invisible for animation
         val checkCircle = TextView(this).apply {
             text = "✓"
             setTextColor(Color.WHITE)
@@ -441,30 +566,47 @@ class PaymentOverlayService : Service() {
                 gravity = Gravity.CENTER
                 bottomMargin = dp(24)
             }
+            // Start hidden for animation
+            scaleX = 0f
+            scaleY = 0f
+            alpha = 0f
         }
         successLayout.addView(checkCircle)
+
+        // Animate checkmark: bounce in with overshoot
+        checkCircle.animate()
+            .scaleX(1f).scaleY(1f)
+            .alpha(1f)
+            .setDuration(600)
+            .setInterpolator(OvershootInterpolator(1.8f))
+            .start()
+
+        // "Payment Successful" text
+        val statusLabel = TextView(this).apply {
+            text = "Payment Successful"
+            setTextColor(Color.parseColor("#66BB6A"))
+            textSize = 22f
+            typeface = Typeface.create("sans-serif", Typeface.BOLD)
+            gravity = Gravity.CENTER
+            setPadding(0, 0, 0, dp(12))
+            alpha = 0f
+        }
+        successLayout.addView(statusLabel)
+        statusLabel.animate().alpha(1f).setDuration(400).setStartDelay(300).start()
 
         // Amount
         val amountText = TextView(this).apply {
             text = "₹${FlowStateMachine.targetAmount}"
             setTextColor(Color.WHITE)
-            textSize = 40f
+            textSize = 44f
             typeface = Typeface.create("sans-serif", Typeface.BOLD)
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(8))
+            alpha = 0f
+            translationY = dp(20).toFloat()
         }
         successLayout.addView(amountText)
-
-        // Status
-        val statusText = TextView(this).apply {
-            text = "Payment Successful"
-            setTextColor(Color.parseColor("#66BB6A"))
-            textSize = 20f
-            typeface = Typeface.create("sans-serif", Typeface.BOLD)
-            gravity = Gravity.CENTER
-            setPadding(0, 0, 0, dp(8))
-        }
-        successLayout.addView(statusText)
+        amountText.animate().alpha(1f).translationY(0f).setDuration(400).setStartDelay(400).start()
 
         // To
         val toText = TextView(this).apply {
@@ -473,8 +615,10 @@ class PaymentOverlayService : Service() {
             textSize = 14f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(4))
+            alpha = 0f
         }
         successLayout.addView(toText)
+        toText.animate().alpha(1f).setDuration(400).setStartDelay(500).start()
 
         // Method
         val methodText = TextView(this).apply {
@@ -483,29 +627,10 @@ class PaymentOverlayService : Service() {
             textSize = 12f
             gravity = Gravity.CENTER
             setPadding(0, 0, 0, dp(32))
+            alpha = 0f
         }
         successLayout.addView(methodText)
-
-        // Message
-        if (message.isNotEmpty() && message != "✅ Payment successful!") {
-            val msgText = TextView(this).apply {
-                text = message
-                setTextColor(Color.parseColor("#9E9E9E"))
-                textSize = 12f
-                gravity = Gravity.CENTER
-                background = GradientDrawable().apply {
-                    setColor(Color.parseColor("#1A1F2B"))
-                    cornerRadius = dp(12).toFloat()
-                }
-                setPadding(dp(16), dp(12), dp(16), dp(12))
-                val lp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT)
-                lp.bottomMargin = dp(24)
-                layoutParams = lp
-            }
-            successLayout.addView(msgText)
-        }
+        methodText.animate().alpha(1f).setDuration(400).setStartDelay(550).start()
 
         // Done button
         val doneBtn = TextView(this).apply {
@@ -524,8 +649,10 @@ class PaymentOverlayService : Service() {
             lp.topMargin = dp(8)
             layoutParams = lp
             setOnClickListener { stopSelf() }
+            alpha = 0f
         }
         successLayout.addView(doneBtn)
+        doneBtn.animate().alpha(1f).setDuration(400).setStartDelay(600).start()
 
         contentFrame?.addView(successLayout)
     }
@@ -536,6 +663,9 @@ class PaymentOverlayService : Service() {
 
     private fun showFailureInternal(message: String) {
         updateOverlayFlags(touchable = true)
+
+        // Dismiss the USSD dialog behind the overlay so it's not visible
+        UssdAccessibilityService.instance?.dismissDialog()
 
         stepsSection?.visibility = View.GONE
         contentFrame?.visibility = View.VISIBLE
@@ -617,11 +747,16 @@ class PaymentOverlayService : Service() {
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             } else {
+                // Only NOT_FOCUSABLE — do NOT use NOT_TOUCHABLE as it causes
+                // the overlay to become transparent on some devices.
+                // The overlay still blocks touches (user can't interact with
+                // USSD dialog behind), which is fine during PIN verification.
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
                     WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
                     WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED or
                     WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
             }
+            params.format = PixelFormat.OPAQUE
             windowManager?.updateViewLayout(overlayView, params)
         } catch (e: Exception) {
             Log.e("OverlayService", "Failed to update flags: ${e.message}")

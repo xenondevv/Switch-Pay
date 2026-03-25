@@ -36,6 +36,10 @@ dependencies:
   cupertino_icons: ^1.0.8
   mobile_scanner: ^7.0.0
   google_fonts: ^6.3.2
+  url_launcher: ^6.2.5
+  shared_preferences: ^2.2.2
+  http: ^1.2.1
+  package_info_plus: ^8.0.0
 
 dev_dependencies:
   flutter_test:

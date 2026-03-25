@@ -128,11 +128,6 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
                   borderSide: const BorderSide(color: Colors.white)),
               ),
             ),
-            const SizedBox(height: 6),
-            Text(
-              'USSD *99# option 1 (Mobile No.) accepts UPI IDs',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
-            ),
             const SizedBox(height: 24),
 
             // Amount
@@ -208,26 +203,7 @@ class _ManualPayScreenState extends State<ManualPayScreen> {
                 ),
               ),
             ),
-            const SizedBox(height: 16),
 
-            // Info
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.04),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  Icon(Icons.info_outline, color: Colors.grey.shade500, size: 16),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text(
-                    'Uses USSD *99# — works without internet',
-                    style: TextStyle(color: Colors.grey.shade500, fontSize: 11),
-                  )),
-                ],
-              ),
-            ),
           ],
         ),
       ),

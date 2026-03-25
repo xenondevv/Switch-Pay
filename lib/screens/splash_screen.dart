@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'home_screen.dart';
+import 'onboarding_screen.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -65,19 +67,22 @@ class _SplashScreenState extends State<SplashScreen>
       if (mounted) _textSlideController.forward();
     });
 
-    // Navigate to home
-    Future.delayed(const Duration(milliseconds: 2600), () {
-      if (mounted) {
-        Navigator.of(context).pushReplacement(
-          PageRouteBuilder(
-            pageBuilder: (_, __, ___) => const HomeScreen(),
-            transitionsBuilder: (_, animation, __, child) {
-              return FadeTransition(opacity: animation, child: child);
-            },
-            transitionDuration: const Duration(milliseconds: 500),
-          ),
-        );
-      }
+    // Navigate based on onboarding status
+    Future.delayed(const Duration(milliseconds: 2600), () async {
+      if (!mounted) return;
+      final prefs = await SharedPreferences.getInstance();
+      final onboarded = prefs.getBool('onboarding_complete') ?? false;
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (_, __, ___) =>
+              onboarded ? const HomeScreen() : const OnboardingScreen(),
+          transitionsBuilder: (_, animation, __, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 500),
+        ),
+      );
     });
   }
 

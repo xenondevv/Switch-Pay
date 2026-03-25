@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/platform_channel.dart';
+import '../services/payment_history.dart';
+import '../services/favorites_service.dart';
 
 class ResultScreen extends StatefulWidget {
   final String target;
@@ -27,6 +29,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
   bool _showPinPad = false;
   String _finalMessage = '';
   String _currentPin = '';
+  bool _savedToFavorites = false;
   late AnimationController _pulseController;
 
   @override
@@ -52,6 +55,14 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
           _finalMessage = step.message;
           _showPinPad = false;
           _pulseController.stop();
+          // Save payment record
+          PaymentHistoryService.addRecord(PaymentRecord(
+            target: widget.target,
+            amount: widget.amount,
+            recipientName: widget.recipientName,
+            timestamp: DateTime.now(),
+            success: _isSuccess,
+          ));
         }
       });
     });
@@ -499,7 +510,37 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
               ],
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
+
+          // Save to Favorites
+          SizedBox(
+            width: double.infinity, height: 48,
+            child: OutlinedButton(
+              onPressed: _savedToFavorites ? null : () async {
+                await FavoritesService.add(FavoriteContact(
+                  name: widget.recipientName ?? widget.target.split('@').first,
+                  upiId: widget.target,
+                  lastPaid: DateTime.now(),
+                ));
+                if (mounted) setState(() => _savedToFavorites = true);
+              },
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white70,
+                side: BorderSide(color: Colors.grey.shade800),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(_savedToFavorites ? Icons.check_rounded : Icons.favorite_border_rounded, size: 18),
+                  const SizedBox(width: 8),
+                  Text(_savedToFavorites ? 'Saved to Favorites' : 'Save to Favorites',
+                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
 
           // Done button
           SizedBox(

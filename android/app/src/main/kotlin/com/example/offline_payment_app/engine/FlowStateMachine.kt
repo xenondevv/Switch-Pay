@@ -40,6 +40,10 @@ object FlowStateMachine {
     private var lastProcessedText = ""
     private var lastProcessedTime = 0L
 
+    // Safety guards
+    private const val TRANSACTION_TIMEOUT_MS = 60_000L   // 60 seconds max
+    private var transactionStartTime = 0L
+
     var statusCallback: ((status: String, message: String, isFinal: Boolean) -> Unit)? = null
 
     fun startNewTransaction(target: String, amount: String) {
@@ -49,6 +53,8 @@ object FlowStateMachine {
         waitingForPin = false
         lastProcessedText = ""
         lastProcessedTime = 0L
+        transactionStartTime = System.currentTimeMillis()
+
         state = State.WAIT_WELCOME
         Log.d(TAG, "New transaction: target=$target, amount=$amount")
         sendStatus("dialing", "📡 Dialing *99# USSD...", false)
@@ -82,8 +88,15 @@ object FlowStateMachine {
 
         val lower = text.lowercase()
 
-        // Deduplicate
+        // SAFETY: Transaction timeout — abort if >60 seconds elapsed
         val now = System.currentTimeMillis()
+        if (transactionStartTime > 0 && (now - transactionStartTime) > TRANSACTION_TIMEOUT_MS) {
+            Log.e(TAG, "SAFETY: Transaction timed out after 60s")
+            abortTransaction(service, "Transaction timed out — auto-cancelled for safety")
+            return
+        }
+
+        // Deduplicate
         val textKey = lower.trim().take(80)
         if (textKey == lastProcessedText && (now - lastProcessedTime) < 1500) {
             Log.d(TAG, "Skipping duplicate text")
@@ -189,11 +202,19 @@ object FlowStateMachine {
 
             State.WAIT_AMOUNT -> {
                 // SBI prompt: "Paying DEVANSH DEV SINGH , Enter Amount in Rs. or 00.Bac"
+                // SAFETY: Reject text that belongs to other steps
+                if (lower.contains("pin") || lower.contains("mpin") ||
+                    lower.contains("remark") || lower.contains("send money to")) {
+                    Log.d(TAG, "WAIT_AMOUNT: Ignoring text from another step")
+                    return
+                }
+
                 if (lower.contains("amount") || lower.contains("rupee") ||
                     lower.contains("rs") || lower.contains("paying") ||
                     (lower.contains("enter") && !lower.contains("mobile") && !lower.contains("number"))) {
 
                     if (lower.contains("mobile") && !lower.contains("amount")) return
+
 
                     val nameMatch = Regex("paying\\s+(.+?)\\s*,", RegexOption.IGNORE_CASE).find(text)
                     val recipientName = nameMatch?.groupValues?.get(1) ?: ""
@@ -205,6 +226,8 @@ object FlowStateMachine {
                     sendStatus("entering_amount", msg, false)
                     service.sendInput(targetAmount)
                     state = State.WAIT_REMARK
+                } else {
+                    Log.d(TAG, "WAIT_AMOUNT: Unrecognized text, waiting")
                 }
             }
 
@@ -226,10 +249,9 @@ object FlowStateMachine {
                         processUssdText(text, service)
                     }
                     else -> {
-                        // Default: skip remark
-                        sendStatus("skipping_remark", "💬 Skipping remark...", false)
-                        service.sendInput("1")
-                        state = State.WAIT_PIN
+                        // SAFETY: Do NOT blindly send "1" — this was causing PIN prompts
+                        // to receive "1" as input, leading to bank UPI lockouts
+                        Log.w(TAG, "WAIT_REMARK: Unrecognized text, NOT sending blind input: ${lower.take(80)}")
                     }
                 }
             }
@@ -245,6 +267,7 @@ object FlowStateMachine {
                     handlePinStep()
                 } else {
                     Log.d(TAG, "WAIT_PIN: Waiting for PIN dialog, ignoring: ${lower.take(60)}")
+                    Log.d(TAG, "WAIT_PIN: Ignoring unrecognized text")
                 }
             }
 
@@ -254,6 +277,10 @@ object FlowStateMachine {
                     lower.contains("approved") || lower.contains("sent") ||
                     lower.contains("credited") || lower.contains("debited") -> {
                         sendStatus("success", "✅ Payment successful!", true)
+                        // Send "2" to select Exit and dismiss the post-payment dialog
+                        if (lower.contains("exit") || lower.contains("save contact")) {
+                            service.sendInput("2")
+                        }
                         service.dismissDialog()
                         state = State.IDLE
                     }
@@ -306,6 +333,17 @@ object FlowStateMachine {
         // If waitingForPin is already true, do nothing (blocked)
     }
 
+    /**
+     * SAFETY: Abort the transaction and dismiss the USSD dialog.
+     * Called when the flow detects it's in an unsafe state.
+     */
+    private fun abortTransaction(service: UssdAccessibilityService, reason: String) {
+        Log.e(TAG, "ABORT: $reason (state=$state)")
+        sendStatus("error", "❌ $reason", true)
+        service.dismissDialog()
+        reset()
+    }
+
     fun reset() {
         state = State.IDLE
         targetAccount = ""
@@ -314,6 +352,8 @@ object FlowStateMachine {
         waitingForPin = false
         lastProcessedText = ""
         lastProcessedTime = 0L
+        transactionStartTime = 0L
+
     }
 
     private fun sendStatus(status: String, message: String, isFinal: Boolean) {

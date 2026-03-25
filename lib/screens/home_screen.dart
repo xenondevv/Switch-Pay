@@ -1,9 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import '../models/payment_request.dart';
 import '../services/platform_channel.dart';
+import '../services/payment_history.dart';
+import '../services/favorites_service.dart';
+import '../services/update_service.dart';
+import '../widgets/update_dialog.dart';
 import 'scanner_screen.dart';
 import 'manual_pay_screen.dart';
+import 'about_screen.dart';
+import 'favorites_screen.dart';
+import 'transaction_detail_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -14,11 +22,36 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _accessibilityEnabled = false;
+  List<PaymentRecord> _recentPayments = [];
+  List<FavoriteContact> _favorites = [];
 
   @override
   void initState() {
     super.initState();
     _checkAccessibility();
+    _loadHistory();
+    _loadFavorites();
+    _checkForUpdate();
+  }
+
+  Future<void> _loadHistory() async {
+    final records = await PaymentHistoryService.getRecords(limit: 5);
+    if (mounted) setState(() => _recentPayments = records);
+  }
+
+  Future<void> _loadFavorites() async {
+    final list = await FavoritesService.getAll();
+    if (mounted) setState(() => _favorites = list);
+  }
+
+  Future<void> _checkForUpdate() async {
+    try {
+      final info = await PackageInfo.fromPlatform();
+      final update = await UpdateService.checkForUpdate(info.version);
+      if (update != null && mounted) {
+        UpdateDialog.show(context, update);
+      }
+    } catch (_) {}
   }
 
   Future<void> _checkAccessibility() async {
@@ -62,25 +95,45 @@ class _HomeScreenState extends State<HomeScreen> {
               const SizedBox(height: 8),
               // Header
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Row(
-                    children: [
-                      Image.asset('assets/spay_logo.png', width: 40, height: 40),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Switch Pay', style: GoogleFonts.outfit(
-                            color: Colors.white, fontSize: 26,
-                            fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-                          const SizedBox(height: 3),
-                          Text('No internet required • USSD *99#', style: TextStyle(
-                            color: Colors.grey.shade600, fontSize: 12)),
-                        ],
-                      ),
-                    ],
+                  Expanded(
+                    child: Row(
+                      children: [
+                        Image.asset('assets/spay_logo.png', width: 40, height: 40),
+                        const SizedBox(width: 12),
+                        Flexible(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Switch Pay', style: GoogleFonts.outfit(
+                                color: Colors.white, fontSize: 26,
+                                fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                              const SizedBox(height: 3),
+                              Text('No internet required • USSD *99#', style: TextStyle(
+                                color: Colors.grey.shade600, fontSize: 12),
+                                overflow: TextOverflow.ellipsis),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                  const SizedBox(width: 8),
+                  GestureDetector(
+                    onTap: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const AboutScreen())),
+                    child: Container(
+                      width: 34,
+                      height: 34,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.06),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(Icons.info_outline_rounded,
+                        color: Colors.grey.shade500, size: 18),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
@@ -164,6 +217,71 @@ class _HomeScreenState extends State<HomeScreen> {
                 color: Colors.grey.shade300,
                 onTap: () => _openScanner(context),
               ),
+              const SizedBox(height: 12),
+              _actionCard(
+                icon: Icons.favorite_rounded,
+                label: 'Favorites',
+                subtitle: '${_favorites.length} saved contacts',
+                color: Colors.grey.shade400,
+                onTap: () async {
+                  await Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => const FavoritesScreen()));
+                  _loadFavorites();
+                },
+              ),
+
+              // Favorite chips
+              if (_favorites.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                SizedBox(
+                  height: 40,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _favorites.length > 5 ? 5 : _favorites.length,
+                    itemBuilder: (context, index) {
+                      final fav = _favorites[index];
+                      return Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: GestureDetector(
+                          onTap: () => Navigator.push(context, MaterialPageRoute(
+                            builder: (_) => ManualPayScreen(
+                              prefillTarget: fav.upiId,
+                              prefillName: fav.name,
+                            ),
+                          )),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF111111),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.grey.shade800),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  width: 22, height: 22,
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withOpacity(0.1),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Center(child: Text(
+                                    fav.name.isNotEmpty ? fav.name[0].toUpperCase() : '?',
+                                    style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                                  )),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(fav.name, style: const TextStyle(
+                                  color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
               const SizedBox(height: 28),
 
               // Quick Send
@@ -220,13 +338,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     const Text('How it works', style: TextStyle(
                       color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
                     const SizedBox(height: 14),
-                    _stepItem('1', 'Dials *99# USSD automatically', Colors.white),
-                    _stepItem('2', 'Navigates bank menus for you', Colors.grey.shade400),
-                    _stepItem('3', 'Fills in recipient & amount', Colors.grey.shade300),
-                    _stepItem('4', 'You enter UPI PIN securely', Colors.white70),
+                    _stepItem('1', 'Enter recipient & amount', Colors.white),
+                    _stepItem('2', 'Automatically processes payment', Colors.grey.shade400),
+                    _stepItem('3', 'Securely enter UPI PIN', Colors.grey.shade300),
+                    _stepItem('4', 'Payment confirmed instantly', Colors.white70),
                   ],
                 ),
               ),
+              const SizedBox(height: 28),
+
+              // Recent Transactions
+              if (_recentPayments.isNotEmpty) ...[
+                const Text('Recent Transactions', style: TextStyle(
+                  color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 14),
+                ...(_recentPayments.map((record) => GestureDetector(
+                  onTap: () => Navigator.push(context, MaterialPageRoute(
+                    builder: (_) => TransactionDetailScreen(record: record))),
+                  child: _transactionItem(record),
+                ))),
+                const SizedBox(height: 28),
+              ],
+
+              // Trust Indicators
+              Row(
+                children: [
+                  _trustBadge(Icons.verified_rounded, 'UPI Verified'),
+                  const SizedBox(width: 10),
+                  _trustBadge(Icons.shield_rounded, 'Secure'),
+                  const SizedBox(width: 10),
+                  _trustBadge(Icons.account_balance_rounded, 'NPCI Powered'),
+                ],
+              ),
+              const SizedBox(height: 20),
+
+              // Footer
+              Center(
+                child: Text(
+                  'Powered by National Payments Corporation of India',
+                  style: TextStyle(color: Colors.grey.shade700, fontSize: 10),
+                ),
+              ),
+              const SizedBox(height: 20),
             ],
           ),
         ),
@@ -291,6 +444,80 @@ class _HomeScreenState extends State<HomeScreen> {
           Expanded(child: Text(text, style: TextStyle(
             color: Colors.grey.shade400, fontSize: 13))),
         ],
+      ),
+    );
+  }
+
+  Widget _transactionItem(PaymentRecord record) {
+    final time = record.timestamp;
+    final timeStr = '${time.day}/${time.month} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Colors.grey.shade800),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(
+                color: (record.success ? Colors.green : Colors.red).withOpacity(0.1),
+                borderRadius: BorderRadius.circular(10)),
+              child: Icon(
+                record.success ? Icons.check_rounded : Icons.close_rounded,
+                color: record.success ? Colors.green.shade400 : Colors.red.shade400,
+                size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    record.recipientName ?? record.target,
+                    style: const TextStyle(
+                      color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(timeStr, style: TextStyle(
+                    color: Colors.grey.shade600, fontSize: 11)),
+                ],
+              ),
+            ),
+            Text(
+              '₹${record.amount}',
+              style: TextStyle(
+                color: record.success ? Colors.white : Colors.grey.shade500,
+                fontSize: 16, fontWeight: FontWeight.w700),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _trustBadge(IconData icon, String label) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          color: const Color(0xFF111111),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade800),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: Colors.grey.shade400, size: 20),
+            const SizedBox(height: 6),
+            Text(label, style: TextStyle(
+              color: Colors.grey.shade500, fontSize: 10, fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }

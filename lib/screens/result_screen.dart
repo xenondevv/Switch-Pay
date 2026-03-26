@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/platform_channel.dart';
 import '../services/payment_history.dart';
-import '../services/favorites_service.dart';
 
 class ResultScreen extends StatefulWidget {
   final String target;
@@ -29,7 +28,6 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
   bool _showPinPad = false;
   String _finalMessage = '';
   String _currentPin = '';
-  bool _savedToFavorites = false;
   late AnimationController _pulseController;
 
   @override
@@ -92,7 +90,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
         if (_currentPin.length >= 4) {
           NativeBridge.sendUpiPin(_currentPin);
           _showPinPad = false;
-          _steps.add(PaymentStep(status: 'pin_sent', message: '🔒 UPI PIN submitted — processing...', isFinal: false));
+          _steps.add(PaymentStep(status: 'pin_sent', message: 'UPI PIN submitted', isFinal: false));
         }
       } else {
         if (_currentPin.length < 6) _currentPin += key;
@@ -224,7 +222,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Text(
-              '📱 USSD *99#',
+              'USSD *99#',
               style: TextStyle(
                 color: Colors.white70,
                 fontSize: 11, fontWeight: FontWeight.w600),
@@ -510,37 +508,7 @@ class _ResultScreenState extends State<ResultScreen> with TickerProviderStateMix
               ],
             ),
           ),
-          const SizedBox(height: 16),
-
-          // Save to Favorites
-          SizedBox(
-            width: double.infinity, height: 48,
-            child: OutlinedButton(
-              onPressed: _savedToFavorites ? null : () async {
-                await FavoritesService.add(FavoriteContact(
-                  name: widget.recipientName ?? widget.target.split('@').first,
-                  upiId: widget.target,
-                  lastPaid: DateTime.now(),
-                ));
-                if (mounted) setState(() => _savedToFavorites = true);
-              },
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: BorderSide(color: Colors.grey.shade800),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(_savedToFavorites ? Icons.check_rounded : Icons.favorite_border_rounded, size: 18),
-                  const SizedBox(width: 8),
-                  Text(_savedToFavorites ? 'Saved to Favorites' : 'Save to Favorites',
-                    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-                ],
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 32),
 
           // Done button
           SizedBox(

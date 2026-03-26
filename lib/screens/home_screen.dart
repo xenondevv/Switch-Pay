@@ -3,7 +3,6 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import '../models/payment_request.dart';
 import '../services/platform_channel.dart';
-import '../services/payment_history.dart';
 import '../services/favorites_service.dart';
 import '../services/update_service.dart';
 import '../widgets/update_dialog.dart';
@@ -11,7 +10,7 @@ import 'scanner_screen.dart';
 import 'manual_pay_screen.dart';
 import 'about_screen.dart';
 import 'favorites_screen.dart';
-import 'transaction_detail_screen.dart';
+import 'transaction_history_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({Key? key}) : super(key: key);
@@ -22,22 +21,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   bool _accessibilityEnabled = false;
-  List<PaymentRecord> _recentPayments = [];
   List<FavoriteContact> _favorites = [];
 
   @override
   void initState() {
     super.initState();
     _checkAccessibility();
-    _loadHistory();
     _loadFavorites();
     _checkForUpdate();
   }
 
-  Future<void> _loadHistory() async {
-    final records = await PaymentHistoryService.getRecords(limit: 5);
-    if (mounted) setState(() => _recentPayments = records);
-  }
+
 
   Future<void> _loadFavorites() async {
     final list = await FavoritesService.getAll();
@@ -347,18 +341,16 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
               const SizedBox(height: 28),
 
-              // Recent Transactions
-              if (_recentPayments.isNotEmpty) ...[
-                const Text('Recent Transactions', style: TextStyle(
-                  color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700)),
-                const SizedBox(height: 14),
-                ...(_recentPayments.map((record) => GestureDetector(
-                  onTap: () => Navigator.push(context, MaterialPageRoute(
-                    builder: (_) => TransactionDetailScreen(record: record))),
-                  child: _transactionItem(record),
-                ))),
-                const SizedBox(height: 28),
-              ],
+              // Transaction History button
+              _actionCard(
+                icon: Icons.receipt_long_rounded,
+                label: 'Transaction History',
+                subtitle: 'View all payments',
+                color: Colors.grey.shade400,
+                onTap: () => Navigator.push(context, MaterialPageRoute(
+                  builder: (_) => const TransactionHistoryScreen())),
+              ),
+              const SizedBox(height: 28),
 
               // Trust Indicators
               Row(
@@ -448,58 +440,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _transactionItem(PaymentRecord record) {
-    final time = record.timestamp;
-    final timeStr = '${time.day}/${time.month} ${time.hour.toString().padLeft(2, '0')}:${time.minute.toString().padLeft(2, '0')}';
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF111111),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.grey.shade800),
-        ),
-        child: Row(
-          children: [
-            Container(
-              width: 36, height: 36,
-              decoration: BoxDecoration(
-                color: (record.success ? Colors.green : Colors.red).withOpacity(0.1),
-                borderRadius: BorderRadius.circular(10)),
-              child: Icon(
-                record.success ? Icons.check_rounded : Icons.close_rounded,
-                color: record.success ? Colors.green.shade400 : Colors.red.shade400,
-                size: 18),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    record.recipientName ?? record.target,
-                    style: const TextStyle(
-                      color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                    maxLines: 1, overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(timeStr, style: TextStyle(
-                    color: Colors.grey.shade600, fontSize: 11)),
-                ],
-              ),
-            ),
-            Text(
-              '₹${record.amount}',
-              style: TextStyle(
-                color: record.success ? Colors.white : Colors.grey.shade500,
-                fontSize: 16, fontWeight: FontWeight.w700),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+
 
   Widget _trustBadge(IconData icon, String label) {
     return Expanded(
